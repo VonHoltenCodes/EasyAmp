@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 import gi
@@ -15,8 +16,8 @@ from .spectrum import SpectrumCapture  # noqa: E402
 
 APP_ID = "codes.vonholten.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
-MARQUEE_WIDTH = 22
-BANDS = 14
+MARQUEE_WIDTH = 24
+BANDS = 20
 
 
 class Marquee:
@@ -59,48 +60,47 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self._suppress = False
         self._seek_src: int | None = None
         self._levels = np.zeros(BANDS, dtype=np.float32)
+        self._peaks = np.zeros(BANDS, dtype=np.float32)
+        self._vu = (0.0, 0.0)
+        self._viz_mode = "spec"  # "spec" or "vu"
 
         self.add_css_class("easyamp")
-        self.set_resizable(False)
-        self.set_default_size(470, 150)
+        self.set_resizable(True)
+        self.set_default_size(640, 360)
+        self.set_size_request(500, 300)
 
-        # ---- title bar ------------------------------------------------
-        titlebar = Gtk.CenterBox()
-        titlebar.add_css_class("eaa-titlebar")
+        # ---- draggable title bar (WindowHandle makes it a drag region) ----
+        bar = Gtk.CenterBox()
+        bar.add_css_class("eaa-titlebar")
         title = Gtk.Label(label="E A S Y A M P")
         title.add_css_class("eaa-title")
-        titlebar.set_start_widget(title)
-        titlebar.set_end_widget(Gtk.WindowControls(side=Gtk.PackType.END))
-        self.set_titlebar(titlebar)
+        bar.set_start_widget(title)
+        bar.set_end_widget(Gtk.WindowControls(side=Gtk.PackType.END))
+        handle = Gtk.WindowHandle()
+        handle.set_child(bar)
+        self.set_titlebar(handle)
 
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        root.set_margin_top(7)
-        root.set_margin_bottom(7)
-        root.set_margin_start(7)
-        root.set_margin_end(7)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        root.set_margin_top(8)
+        root.set_margin_bottom(8)
+        root.set_margin_start(8)
+        root.set_margin_end(8)
         self.set_child(root)
 
-        # ---- display row ---------------------------------------------
-        display = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        display.add_css_class("eaa-display")
-
-        self.viz = Gtk.DrawingArea()
-        self.viz.add_css_class("eaa-viz")
-        self.viz.set_content_width(80)
-        self.viz.set_content_height(42)
-        self.viz.set_draw_func(self._draw_viz)
-        display.append(self.viz)
+        # ---- info strip: big number + indicators + marquee + seek ----
+        info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        info.add_css_class("eaa-display")
 
         self.lcd_num = Gtk.Label(label="00")
         self.lcd_num.add_css_class("eaa-bignum")
         self.lcd_num.set_valign(Gtk.Align.CENTER)
-        display.append(self.lcd_num)
+        info.append(self.lcd_num)
 
-        lcd = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        lcd = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         lcd.set_hexpand(True)
         lcd.set_valign(Gtk.Align.CENTER)
 
-        inds = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        inds = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.ind_state = Gtk.Label(label="ACTIVE")
         self.ind_state.add_css_class("eaa-ind")
         self.ind_chan = Gtk.Label(label="STEREO")
@@ -119,18 +119,26 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         lcd.append(self.marquee_lbl)
         self.marquee = Marquee(self.marquee_lbl)
 
-        # position / seek bar (scrubs through presets)
         self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1)
         self.seek.add_css_class("eaa-seek")
         self.seek.set_draw_value(False)
         self.seek.connect("value-changed", self.on_seek)
         lcd.append(self.seek)
 
-        display.append(lcd)
-        root.append(display)
+        info.append(lcd)
+        root.append(info)
 
-        # ---- transport row -------------------------------------------
-        xport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        # ---- large expanding visualizer panel ----
+        self.viz = Gtk.DrawingArea()
+        self.viz.add_css_class("eaa-viz")
+        self.viz.set_vexpand(True)
+        self.viz.set_hexpand(True)
+        self.viz.set_content_height(120)
+        self.viz.set_draw_func(self._draw_viz)
+        root.append(self.viz)
+
+        # ---- transport row ----
+        xport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         xport.add_css_class("eaa-transport")
 
         self.btn_prev = self._xport_btn("⏮", self.on_prev)
@@ -144,6 +152,12 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         sep.add_css_class("eaa-xsep")
         xport.append(sep)
 
+        self.btn_viz = Gtk.Button(label="VU")
+        self.btn_viz.add_css_class("eaa-button")
+        self.btn_viz.set_tooltip_text("Toggle spectrum / VU meters")
+        self.btn_viz.connect("clicked", self.on_toggle_viz)
+        xport.append(self.btn_viz)
+
         self.preset_model = Gtk.StringList()
         self.dropdown = Gtk.DropDown(model=self.preset_model)
         self.dropdown.add_css_class("eaa-combo")
@@ -153,8 +167,8 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
         root.append(xport)
 
-        # spectrum capture lifecycle
-        self.spectrum = SpectrumCapture(bands=BANDS, on_data=self._on_spectrum)
+        # spectrum lifecycle
+        self.spectrum = SpectrumCapture(bands=BANDS, on_data=self._on_data)
         self.connect("map", lambda *_: self.spectrum.start())
         self.connect("close-request", self._on_close)
 
@@ -218,6 +232,11 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
     def on_bypass(self, _b):
         self._set_bypass_ui(self.ee.toggle_bypass())
 
+    def on_toggle_viz(self, _b):
+        self._viz_mode = "vu" if self._viz_mode == "spec" else "spec"
+        self.btn_viz.set_label("SPEC" if self._viz_mode == "vu" else "VU")
+        self.viz.queue_draw()
+
     def on_dropdown(self, dropdown, _pspec):
         if self._suppress:
             return
@@ -229,7 +248,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         idx = int(round(scale.get_value()))
         if not self._presets:
             return
-        # update display live; debounce the actual (slow) preset load
         self._idx = idx
         self.marquee.set_text(self._presets[idx])
         self.lcd_num.set_text(f"{idx + 1:02d}")
@@ -246,37 +264,120 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             self.ee.load_preset(self._presets[self._idx])
         return False
 
-    # ---- spectrum -----------------------------------------------------
-    def _on_spectrum(self, levels) -> bool:
+    # ---- visualizer ---------------------------------------------------
+    def _on_data(self, levels, vu) -> bool:
         self._levels = levels
+        self._peaks = np.maximum(levels, self._peaks - 0.015)
+        self._vu = vu
         self.viz.queue_draw()
         return False
 
     def _draw_viz(self, _area, cr, w, h) -> None:
         cr.set_source_rgb(0, 0, 0)
         cr.paint()
-        levels = self._levels
+        if w <= 0 or h <= 0:
+            return
+        if self._viz_mode == "vu":
+            self._draw_vu(cr, w, h)
+        else:
+            self._draw_spectrum(cr, w, h)
+
+    def _draw_spectrum(self, cr, w, h) -> None:
+        levels, peaks = self._levels, self._peaks
         n = len(levels)
-        if n == 0 or w <= 0 or h <= 0:
+        if n == 0:
             return
         gap = 2.0
         bw = (w - gap * (n + 1)) / n
-        seg_h, seg_gap = 3.0, 1.0
-        total_segs = max(int(h // (seg_h + seg_gap)), 1)
+        seg_h, seg_gap = 4.0, 1.5
+        total = max(int(h // (seg_h + seg_gap)), 1)
         for i in range(n):
             x = gap + i * (bw + gap)
-            lit = int(float(levels[i]) * total_segs)
+            lit = int(float(levels[i]) * total)
             for s in range(lit):
                 y = h - (s + 1) * (seg_h + seg_gap)
-                frac = s / max(total_segs - 1, 1)
+                frac = s / max(total - 1, 1)
                 if frac > 0.85:
-                    cr.set_source_rgb(0.88, 0.10, 0.10)
+                    cr.set_source_rgb(0.90, 0.12, 0.10)
                 elif frac > 0.62:
-                    cr.set_source_rgb(0.88, 0.82, 0.10)
+                    cr.set_source_rgb(0.90, 0.82, 0.12)
                 else:
-                    cr.set_source_rgb(0.10, 0.88, 0.18)
+                    cr.set_source_rgb(0.12, 0.90, 0.20)
                 cr.rectangle(x, y, bw, seg_h)
                 cr.fill()
+            # falling peak cap
+            ps = int(float(peaks[i]) * total)
+            if ps > 0:
+                y = h - ps * (seg_h + seg_gap)
+                cr.set_source_rgb(0.80, 1.0, 0.85)
+                cr.rectangle(x, y, bw, seg_h * 0.55)
+                cr.fill()
+
+    def _draw_vu(self, cr, w, h) -> None:
+        gap = 8.0
+        cell = (w - gap * 3) / 2
+        self._vu_gauge(cr, gap, gap, cell, h - 2 * gap, self._vu[0], "L")
+        self._vu_gauge(cr, gap * 2 + cell, gap, cell, h - 2 * gap, self._vu[1], "R")
+
+    @staticmethod
+    def _rrect(cr, x, y, w, h, r) -> None:
+        cr.new_sub_path()
+        cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+        cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+        cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+        cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+        cr.close_path()
+
+    def _vu_gauge(self, cr, x, y, w, h, value, label) -> None:
+        # cream face
+        cr.set_source_rgb(0.92, 0.89, 0.76)
+        self._rrect(cr, x, y, w, h, 4)
+        cr.fill()
+        cx = x + w / 2
+        base_y = y + h * 0.90
+        r = min(w * 0.40, h * 0.74)
+
+        def pt(frac, rad):
+            a = math.radians(135 - frac * 90)
+            return cx + rad * math.cos(a), base_y - rad * math.sin(a)
+
+        # scale arc
+        cr.set_line_width(2)
+        cr.set_source_rgb(0.10, 0.10, 0.10)
+        cr.move_to(*pt(0.0, r))
+        for i in range(1, 41):
+            cr.line_to(*pt(i / 40, r))
+        cr.stroke()
+        # red overload zone (top 20%)
+        cr.set_line_width(3)
+        cr.set_source_rgb(0.82, 0.12, 0.10)
+        cr.move_to(*pt(0.8, r))
+        for i in range(1, 21):
+            cr.line_to(*pt(0.8 + 0.2 * i / 20, r))
+        cr.stroke()
+        # ticks
+        cr.set_line_width(1.5)
+        cr.set_source_rgb(0.10, 0.10, 0.10)
+        for t in range(11):
+            x1, y1 = pt(t / 10, r - 5)
+            x2, y2 = pt(t / 10, r)
+            cr.move_to(x1, y1)
+            cr.line_to(x2, y2)
+            cr.stroke()
+        # needle
+        nx, ny = pt(max(0.0, min(1.0, value)), r)
+        cr.set_line_width(2.5)
+        cr.set_source_rgb(0.05, 0.05, 0.05)
+        cr.move_to(cx, base_y)
+        cr.line_to(nx, ny)
+        cr.stroke()
+        cr.arc(cx, base_y, 3, 0, 2 * math.pi)
+        cr.fill()
+        # label
+        cr.select_font_face("monospace")
+        cr.set_font_size(11)
+        cr.move_to(x + 6, y + h - 6)
+        cr.show_text(label)
 
     def _on_close(self, *_):
         self.spectrum.stop()

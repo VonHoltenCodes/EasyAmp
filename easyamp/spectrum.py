@@ -1,11 +1,13 @@
-"""Live audio spectrum capture.
+"""Live audio capture for the visualizer.
 
-Captures the monitor of the current default sink with `parec` (PipeWire's
-PulseAudio-compatible recorder), runs an FFT in numpy, and reports
-log-spaced band levels via a callback marshalled onto the GTK main loop.
+Captures the current default sink's monitor with `parec` (PipeWire's
+PulseAudio-compatible recorder) in stereo, then per frame computes:
 
-This is fully decoupled from EasyEffects: we visualise the system output
-(post-effects), so the bars reflect exactly what you hear.
+  * a log-spaced FFT spectrum (mono downmix) for the bar display, and
+  * per-channel RMS levels (L/R) for the analog VU meters,
+
+reporting both to a callback marshalled onto the GTK main loop. Fully
+decoupled from EasyEffects: it visualises the system output (post-effects).
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ EPS = 1e-9
 
 
 def _default_monitor() -> str:
-    """Monitor source name for the current default sink (best-effort)."""
     try:
         sink = subprocess.run(
             ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=4
@@ -35,10 +36,11 @@ def _default_monitor() -> str:
 
 
 class SpectrumCapture:
-    def __init__(self, bands: int = 14, on_data=None):
+    def __init__(self, bands: int = 20, on_data=None):
         self.bands = bands
         self.on_data = on_data
         self.levels = np.zeros(bands, dtype=np.float32)
+        self.vu = (0.0, 0.0)
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -58,7 +60,7 @@ class SpectrumCapture:
         try:
             self._proc = subprocess.Popen(
                 ["parec", "--format=float32le", f"--rate={RATE}",
-                 "--channels=1", "--raw", f"--device={_default_monitor()}",
+                 "--channels=2", "--raw", f"--device={_default_monitor()}",
                  "--latency-msec=40"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
             )
@@ -69,9 +71,10 @@ class SpectrumCapture:
         self._thread.start()
 
     def _run(self) -> None:
-        need = FFT * 4  # float32 mono
+        need = FFT * 2 * 4  # stereo float32
         buf = bytearray()
         smoothed = np.zeros(self.bands, dtype=np.float32)
+        vu_l = vu_r = 0.0
         while not self._stop.is_set() and self._proc and self._proc.stdout:
             chunk = self._proc.stdout.read(need - len(buf))
             if not chunk:
@@ -79,21 +82,33 @@ class SpectrumCapture:
             buf += chunk
             if len(buf) < need:
                 continue
-            samples = np.frombuffer(bytes(buf), dtype=np.float32)
+            stereo = np.frombuffer(bytes(buf), dtype=np.float32).reshape(-1, 2)
             buf.clear()
+            left, right = stereo[:, 0], stereo[:, 1]
+            mono = (left + right) * 0.5
 
-            mag = np.abs(np.fft.rfft(samples * self._window)) / (FFT / 2)
+            # ---- spectrum (mono) ----
+            mag = np.abs(np.fft.rfft(mono * self._window)) / (FFT / 2)
             out = np.empty(self.bands, dtype=np.float32)
             for i, b in enumerate(self._bins):
                 band = mag[b].mean() if len(b) else 0.0
                 db = 20.0 * np.log10(band + EPS)
                 out[i] = float(np.clip((db + 60.0) / 60.0, 0.0, 1.0))
-
-            # fast attack, slow decay for VU-like motion
-            smoothed = np.maximum(out, smoothed * 0.80)
+            smoothed = np.maximum(out, smoothed * 0.80)  # fast attack, slow decay
             self.levels = smoothed
+
+            # ---- VU (per channel RMS, ~averaging ballistics) ----
+            def lvl(ch):
+                rms = float(np.sqrt(np.mean(ch * ch)))
+                db = 20.0 * np.log10(rms + EPS)
+                return float(np.clip((db + 50.0) / 50.0, 0.0, 1.0))
+
+            vu_l = vu_l * 0.7 + lvl(left) * 0.3
+            vu_r = vu_r * 0.7 + lvl(right) * 0.3
+            self.vu = (vu_l, vu_r)
+
             if self.on_data:
-                GLib.idle_add(self.on_data, smoothed.copy())
+                GLib.idle_add(self.on_data, smoothed.copy(), (vu_l, vu_r))
 
     def stop(self) -> None:
         self._stop.set()

@@ -16,16 +16,16 @@ window.easyamp {
   background-image: linear-gradient(180deg, #2a2a2a 0%, #131313 100%);
   border-bottom: 1px solid #000000;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
-  padding: 2px 8px;
-  min-height: 20px;
+  padding: 4px 10px;
+  min-height: 28px;
 }
 
 .eaa-title {
   color: #7fe07f;
   font-weight: bold;
-  font-size: 11px;
-  letter-spacing: 2px;
-  text-shadow: 0 0 5px rgba(26,224,26,0.5), 1px 1px 0 rgba(0,0,0,0.9);
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-shadow: 0 0 6px rgba(26,224,26,0.55), 1px 1px 0 rgba(0,0,0,0.9);
 }
 
 /* ---- recessed black LCD display ---- */
@@ -36,34 +36,32 @@ window.easyamp {
   border-right: 1px solid #3a3a3a;
   border-bottom: 1px solid #3a3a3a;
   box-shadow: inset 0 0 14px rgba(0,0,0,0.95);
-  padding: 6px 8px;
+  padding: 8px 12px;
 }
 
 /* big 7-segment number (digits only) */
 .eaa-bignum {
   color: #1ae01a;
   font-family: "DSEG7 Classic", monospace;
-  font-size: 30px;
-  text-shadow: 0 0 8px rgba(26,224,26,0.85);
-  padding: 0 8px;
-  /* faint unlit segments behind the lit ones */
-  background-image: none;
+  font-size: 42px;
+  text-shadow: 0 0 10px rgba(26,224,26,0.85);
+  padding: 0 10px;
 }
 
 /* scrolling preset marquee (letters -> pixel font, not DSEG) */
 .eaa-lcd {
   color: #1ae01a;
   font-family: "Pixelify Sans", monospace;
-  font-size: 15px;
+  font-size: 18px;
   letter-spacing: 1px;
-  text-shadow: 0 0 6px rgba(26,224,26,0.7);
+  text-shadow: 0 0 7px rgba(26,224,26,0.7);
 }
 
 /* small dim indicators that light up */
 .eaa-ind {
   color: #2f5f2f;
   font-family: "Pixelify Sans", sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 1px;
 }
 
@@ -84,9 +82,10 @@ window.easyamp {
 
 /* square beveled transport buttons */
 .eaa-xport {
-  min-width: 30px;
-  min-height: 24px;
+  min-width: 42px;
+  min-height: 32px;
   padding: 0;
+  font-size: 15px;
   background-image: linear-gradient(180deg, #474747 0%, #2e2e2e 100%);
   color: #d8d8d8;
   border-top: 1px solid #606060;
@@ -120,8 +119,8 @@ window.easyamp {
 
 /* generic labeled button (EQ) */
 .eaa-button {
-  min-height: 24px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 14px;
   background-image: linear-gradient(180deg, #474747 0%, #2e2e2e 100%);
   color: #d8d8d8;
   border-top: 1px solid #606060;
@@ -148,7 +147,7 @@ window.easyamp {
 /* compact preset dropdown */
 .eaa-combo,
 .eaa-combo > button {
-  min-height: 24px;
+  min-height: 32px;
   background-image: linear-gradient(180deg, #3a3a3a 0%, #2c2c2c 100%);
   color: #cfcfcf;
   border-top: 1px solid #555;
