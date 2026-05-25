@@ -67,7 +67,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.playlist: list[str] = []
         self.track = -1
         self._playing = False
-        self._suppress_seek = False
         self._levels = np.zeros(BANDS, dtype=np.float32)
         self._peaks = np.zeros(BANDS, dtype=np.float32)
         self._vu = (0.0, 0.0)
@@ -351,9 +350,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         if self.track >= 0:
             dur, pos = self.player.duration(), self.player.position()
             if dur > 0:
-                self._suppress_seek = True
-                self.seek.set_value(pos / dur * 1000.0)
-                self._suppress_seek = False
+                self.seek.set_fraction(pos / dur)
             self.lcd_time.set_text(_fmt(pos))
             si = self.player.stream_info()
             self.ind_khz.set_text(f"{round(si['rate']/1000)}K" if si["rate"] else "--K")
