@@ -72,8 +72,17 @@ class SpectrumCapture:
     def start(self) -> None:
         if self._pipeline is not None:
             return
+        # Prefer a sink-monitor source (Linux/PipeWire captures the system
+        # output). Otherwise fall back to the platform default source via
+        # autoaudiosrc (osxaudiosrc on macOS, etc.). On macOS there's no
+        # output monitor, so the meters need a loopback device (e.g.
+        # BlackHole) set as the default input to show system audio.
         dev = _find_monitor_device()
-        src = dev.create_element(None) if dev else Gst.ElementFactory.make("pulsesrc", None)
+        if dev is not None:
+            src = dev.create_element(None)
+        else:
+            src = (Gst.ElementFactory.make("autoaudiosrc", None)
+                   or Gst.ElementFactory.make("pulsesrc", None))
         if src is None:
             return
         conv = Gst.ElementFactory.make("audioconvert", None)
