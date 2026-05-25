@@ -54,15 +54,19 @@ jobs:
           cd packaging/windows
           pyinstaller --noconfirm --clean EasyAmp.spec
 
-      - name: Harden the bundle (GTK schemas, icon themes, pixbuf loaders)
+      - name: Harden the bundle (GTK schemas, icon themes)
         run: |
-          DEST=packaging/windows/dist/EasyAmp
-          mkdir -p "$DEST/share/glib-2.0/schemas" "$DEST/share/icons" "$DEST/lib"
+          # PyInstaller 6 onedir keeps everything in _internal/, which is what
+          # sys._MEIPASS points to at runtime.
+          DEST=packaging/windows/dist/EasyAmp/_internal
+          mkdir -p "$DEST/share/glib-2.0/schemas" "$DEST/share/icons"
           glib-compile-schemas /mingw64/share/glib-2.0/schemas --targetdir "$DEST/share/glib-2.0/schemas" || \
             cp -f /mingw64/share/glib-2.0/schemas/gschemas.compiled "$DEST/share/glib-2.0/schemas/"
           cp -rf /mingw64/share/icons/Adwaita "$DEST/share/icons/" || true
           cp -rf /mingw64/share/icons/hicolor "$DEST/share/icons/" || true
-          cp -rf /mingw64/lib/gdk-pixbuf-2.0 "$DEST/lib/" || true
+          echo "schemas: $(ls -1 "$DEST/share/glib-2.0/schemas/")"
+          echo "Gtk typelib present in bundle: $(ls packaging/windows/dist/EasyAmp/_internal/gi_typelibs/ | grep -i gtk || echo MISSING)"
+          echo "libgtk dll present: $(find packaging/windows/dist/EasyAmp -iname 'libgtk-4*' | head -1 || echo MISSING)"
 
       - name: Package the portable .zip
         shell: pwsh
