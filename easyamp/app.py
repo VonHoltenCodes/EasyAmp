@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 
 import cairo
 
@@ -569,12 +570,29 @@ class EasyAmpApp(Gtk.Application):
         Gtk.Application.do_startup(self)
         from .fontload import ensure_fonts
         ensure_fonts()
+
+    def _install_css(self):
+        # Apply our stylesheet once a display exists. This runs from
+        # do_activate rather than do_startup because on some platforms
+        # (notably Windows) the default display isn't ready during startup,
+        # which would silently drop the whole stylesheet.
+        if getattr(self, "_css_installed", False):
+            return
+        display = Gdk.Display.get_default()
+        if display is None:
+            print("EasyAmp: no default display; stylesheet not applied", file=sys.stderr)
+            return
         provider = Gtk.CssProvider()
+        provider.connect(
+            "parsing-error",
+            lambda _p, _sec, err: print(f"EasyAmp CSS error: {err.message}", file=sys.stderr))
         provider.load_from_path(STYLE)
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self._css_installed = True
 
     def do_activate(self):
+        self._install_css()
         win = self.props.active_window or EasyAmpWindow(self)
         win.present()
 

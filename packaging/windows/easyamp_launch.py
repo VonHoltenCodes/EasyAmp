@@ -1,26 +1,58 @@
 """PyInstaller entry point for the Windows build.
 
-Point GTK at the bundled GSettings schemas and icon themes (which live in
-``_internal/share`` next to the frozen exe) before importing anything that
-loads GTK, otherwise GTK4 fails to find its settings schema at startup.
+Wire up the bundled GTK runtime *before* importing anything that loads GTK:
+  * GSettings schemas + icon themes live in ``_internal/share``;
+  * fonts must be made visible to fontconfig (GTK4/MSYS2 uses fontconfig, not
+    Windows GDI), which means writing a fonts.conf and pointing
+    ``FONTCONFIG_FILE`` at it before Pango initialises.
 """
 import os
 import sys
 
-if getattr(sys, "frozen", False):
-    _exe_dir = os.path.dirname(sys.executable)
-    _internal = os.path.join(_exe_dir, "_internal")
-    _base = _internal if os.path.isdir(_internal) else _exe_dir
+
+def _bootstrap_gtk_runtime() -> None:
+    exe_dir = os.path.dirname(sys.executable)
+    internal = os.path.join(exe_dir, "_internal")
+    base = internal if os.path.isdir(internal) else exe_dir
+
     os.environ.setdefault(
-        "GSETTINGS_SCHEMA_DIR", os.path.join(_base, "share", "glib-2.0", "schemas"))
+        "GSETTINGS_SCHEMA_DIR", os.path.join(base, "share", "glib-2.0", "schemas"))
     os.environ["XDG_DATA_DIRS"] = (
-        os.path.join(_base, "share") + os.pathsep + os.environ.get("XDG_DATA_DIRS", ""))
-    if hasattr(os, "add_dll_directory") and os.path.isdir(_base):
+        os.path.join(base, "share") + os.pathsep + os.environ.get("XDG_DATA_DIRS", ""))
+    if hasattr(os, "add_dll_directory") and os.path.isdir(base):
         try:
-            os.add_dll_directory(_base)
+            os.add_dll_directory(base)
         except OSError:
             pass
 
-from easyamp.app import main  # noqa: E402 — must follow the env setup above
+    # Make the bundled fonts discoverable via fontconfig (keep the Windows
+    # system fonts too, as fallbacks).
+    try:
+        font_dir = os.path.join(base, "easyamp", "fonts").replace("\\", "/")
+        win_fonts = os.path.join(
+            os.environ.get("WINDIR", r"C:\Windows"), "Fonts").replace("\\", "/")
+        conf_dir = os.path.join(os.environ.get("LOCALAPPDATA", exe_dir), "EasyAmp")
+        os.makedirs(conf_dir, exist_ok=True)
+        cache_dir = os.path.join(conf_dir, "fc-cache").replace("\\", "/")
+        conf_path = os.path.join(conf_dir, "fonts.conf")
+        with open(conf_path, "w", encoding="utf-8") as fh:
+            fh.write(
+                '<?xml version="1.0"?>\n'
+                '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n'
+                "<fontconfig>\n"
+                f"  <dir>{font_dir}</dir>\n"
+                f"  <dir>{win_fonts}</dir>\n"
+                f"  <cachedir>{cache_dir}</cachedir>\n"
+                "</fontconfig>\n"
+            )
+        os.environ["FONTCONFIG_FILE"] = conf_path
+    except OSError:
+        pass  # fonts are optional; CSS falls back to a generic family
+
+
+if getattr(sys, "frozen", False) and sys.platform == "win32":
+    _bootstrap_gtk_runtime()
+
+from easyamp.app import main  # noqa: E402 — must follow the runtime setup above
 
 sys.exit(main())
