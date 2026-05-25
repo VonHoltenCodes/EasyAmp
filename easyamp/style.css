@@ -225,6 +225,11 @@ window.easyamp {
   border-right: 1px solid #2a2a32; border-bottom: 1px solid #2a2a32;
   box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
 }
+/* the ListBox/viewport inside the scroller paint their own (light) bg on
+   some themes — clear them so the dark .eaa-playlist background shows. */
+.eaa-playlist > viewport,
+.eaa-playlist list,
+.eaa-playlist listview { background-color: transparent; }
 .eaa-playlist row { background-color: transparent; padding: 0; }
 .eaa-playlist row:selected { background-color: #1b3aa0; }
 .eaa-track {
