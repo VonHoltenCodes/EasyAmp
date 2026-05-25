@@ -368,17 +368,28 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         return False
 
     def _draw_scope(self, _a, cr, w, h):
+        """White mirrored waveform: magnitude reflected above and below
+        the centre line, filled."""
         wave = self._wave
         n = len(wave)
         if n < 2 or w <= 0 or h <= 0:
             return
-        cr.set_source_rgb(0.10, 0.92, 0.16)
-        cr.set_line_width(1)
         mid = h / 2
+        amp = h * 0.46
+
+        def xx(i):
+            return w * i / (n - 1)
+
+        cr.move_to(0, mid)
         for i in range(n):
-            x = w * i / (n - 1)
-            y = mid - float(wave[i]) * (h * 0.46)
-            cr.line_to(x, y) if i else cr.move_to(x, y)
+            cr.line_to(xx(i), mid - abs(float(wave[i])) * amp)   # top envelope
+        for i in range(n - 1, -1, -1):
+            cr.line_to(xx(i), mid + abs(float(wave[i])) * amp)   # bottom mirror
+        cr.close_path()
+        cr.set_source_rgba(0.95, 0.96, 1.0, 0.30)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.96, 0.97, 1.0)
+        cr.set_line_width(1)
         cr.stroke()
 
     def _draw_viz(self, _area, cr, w, h):
