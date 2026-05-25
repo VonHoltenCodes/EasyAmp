@@ -25,9 +25,27 @@ def _user_font_dir() -> str:
     return os.path.join(base, "fonts", "EasyAmp")
 
 
+def _register_fonts_win() -> None:
+    """Register the bundled fonts for this process on Windows (no admin).
+
+    GTK builds vary in whether they read GDI-registered fonts or fontconfig,
+    so this is best-effort; the CSS still falls back if it doesn't take.
+    """
+    import ctypes
+
+    FR_PRIVATE = 0x10
+    for name in FONT_FILES:
+        src = os.path.join(FONT_SRC, name)
+        if os.path.isfile(src):
+            ctypes.windll.gdi32.AddFontResourceExW(src, FR_PRIVATE, 0)
+
+
 def ensure_fonts() -> None:
-    """Best-effort: copy bundled fonts to the user font dir; never raises."""
+    """Best-effort: make the bundled fonts available; never raises."""
     try:
+        if sys.platform == "win32":
+            _register_fonts_win()
+            return
         dst = _user_font_dir()
         os.makedirs(dst, exist_ok=True)
         copied = False

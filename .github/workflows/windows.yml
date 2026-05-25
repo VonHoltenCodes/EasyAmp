@@ -1,0 +1,96 @@
+name: Windows
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows .exe installer + zip
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2 (MINGW64 GTK4 + GStreamer)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-python-gobject
+            mingw-w64-x86_64-python-cairo
+            mingw-w64-x86_64-gstreamer
+            mingw-w64-x86_64-gst-plugins-base
+            mingw-w64-x86_64-gst-plugins-good
+            mingw-w64-x86_64-gst-plugins-bad
+            mingw-w64-x86_64-adwaita-icon-theme
+            mingw-w64-x86_64-hicolor-icon-theme
+            mingw-w64-x86_64-librsvg
+            mingw-w64-x86_64-python-numpy
+            mingw-w64-x86_64-python-pillow
+            mingw-w64-x86_64-python-pip
+
+      - name: Install EasyAmp + PyInstaller
+        run: |
+          python -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk, Gst; print('gi OK')"
+          pip install --upgrade pip
+          pip install pyinstaller pyinstaller-hooks-contrib
+          pip install --no-deps .
+
+      - name: Build the .ico from the logo
+        run: |
+          python -c "from PIL import Image; Image.open('assets/icons/easyamp-256.png').save('packaging/windows/easyamp.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+
+      - name: Build the .exe (PyInstaller)
+        run: |
+          cd packaging/windows
+          pyinstaller --noconfirm --clean EasyAmp.spec
+
+      - name: Harden the bundle (GTK schemas, icon themes, pixbuf loaders)
+        run: |
+          DEST=packaging/windows/dist/EasyAmp
+          mkdir -p "$DEST/share/glib-2.0/schemas" "$DEST/share/icons" "$DEST/lib"
+          glib-compile-schemas /mingw64/share/glib-2.0/schemas --targetdir "$DEST/share/glib-2.0/schemas" || \
+            cp -f /mingw64/share/glib-2.0/schemas/gschemas.compiled "$DEST/share/glib-2.0/schemas/"
+          cp -rf /mingw64/share/icons/Adwaita "$DEST/share/icons/" || true
+          cp -rf /mingw64/share/icons/hicolor "$DEST/share/icons/" || true
+          cp -rf /mingw64/lib/gdk-pixbuf-2.0 "$DEST/lib/" || true
+
+      - name: Package the portable .zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path packaging/windows/dist/EasyAmp/* -DestinationPath EasyAmp-windows-x64.zip -Force
+
+      - name: Build the installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path easyamp/__init__.py -Pattern '__version__ = "(.+)"').Matches.Groups[1].Value
+          Write-Host "Version: $ver"
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$ver" packaging\windows\EasyAmp.iss
+          Copy-Item packaging\windows\EasyAmp-Setup-x64.exe .\EasyAmp-Setup-x64.exe
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyAmp-windows-x64
+          path: |
+            EasyAmp-windows-x64.zip
+            EasyAmp-Setup-x64.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            EasyAmp-windows-x64.zip
+            EasyAmp-Setup-x64.exe

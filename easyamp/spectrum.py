@@ -15,6 +15,8 @@ with ``GstDeviceMonitor`` so no host ``pactl`` is required.
 
 from __future__ import annotations
 
+import sys
+
 import gi
 
 gi.require_version("Gst", "1.0")
@@ -49,6 +51,28 @@ def _find_monitor_device():
     return chosen
 
 
+def _make_capture_source():
+    """Create a GStreamer element that captures the system audio output.
+
+    * Windows: WASAPI loopback records the default render device directly, so
+      the visualizer works with no extra setup.
+    * Linux/PipeWire: a sink-monitor source captures the system output.
+    * Otherwise (macOS, etc.): fall back to the platform default input, which
+      only carries system audio if a loopback device is the default input.
+    """
+    if sys.platform == "win32":
+        for factory in ("wasapi2src", "wasapisrc"):
+            el = Gst.ElementFactory.make(factory, None)
+            if el is not None:
+                el.set_property("loopback", True)
+                return el
+    dev = _find_monitor_device()
+    if dev is not None:
+        return dev.create_element(None)
+    return (Gst.ElementFactory.make("autoaudiosrc", None)
+            or Gst.ElementFactory.make("pulsesrc", None))
+
+
 class SpectrumCapture:
     def __init__(self, bands: int = 20, on_data=None):
         self.bands = bands
@@ -72,17 +96,7 @@ class SpectrumCapture:
     def start(self) -> None:
         if self._pipeline is not None:
             return
-        # Prefer a sink-monitor source (Linux/PipeWire captures the system
-        # output). Otherwise fall back to the platform default source via
-        # autoaudiosrc (osxaudiosrc on macOS, etc.). On macOS there's no
-        # output monitor, so the meters need a loopback device (e.g.
-        # BlackHole) set as the default input to show system audio.
-        dev = _find_monitor_device()
-        if dev is not None:
-            src = dev.create_element(None)
-        else:
-            src = (Gst.ElementFactory.make("autoaudiosrc", None)
-                   or Gst.ElementFactory.make("pulsesrc", None))
+        src = _make_capture_source()
         if src is None:
             return
         conv = Gst.ElementFactory.make("audioconvert", None)
