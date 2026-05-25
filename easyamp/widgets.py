@@ -31,6 +31,40 @@ class GoldBars(Gtk.DrawingArea):
         cr.stroke()
 
 
+class StatusIndicator(Gtk.DrawingArea):
+    """Stacked green (top) / red (bottom) square LEDs + a play triangle.
+    Green lights on play, red lights on stop, triangle glows on play."""
+
+    def __init__(self):
+        super().__init__()
+        self.state = "stop"
+        self.set_content_width(30)
+        self.set_content_height(18)
+        self.set_draw_func(self._draw)
+
+    def set_state(self, state: str) -> None:
+        self.state = state
+        self.queue_draw()
+
+    def _draw(self, _a, cr, w, h):
+        playing = self.state == "play"
+        stopped = self.state == "stop"
+        sq = 6
+        cr.set_source_rgb(*((0.16, 1.0, 0.20) if playing else (0.05, 0.20, 0.07)))
+        cr.rectangle(1, h / 2 - sq - 1, sq, sq)
+        cr.fill()
+        cr.set_source_rgb(*((1.0, 0.16, 0.12) if stopped else (0.26, 0.05, 0.04)))
+        cr.rectangle(1, h / 2 + 1, sq, sq)
+        cr.fill()
+        tx = 1 + sq + 5
+        cr.set_source_rgb(*((0.16, 1.0, 0.20) if playing else (0.10, 0.34, 0.12)))
+        cr.move_to(tx, h * 0.22)
+        cr.line_to(tx, h * 0.78)
+        cr.line_to(tx + h * 0.56, h * 0.5)
+        cr.close_path()
+        cr.fill()
+
+
 class SeekBar(Gtk.DrawingArea):
     """Custom position bar: green progress + light-grey grip with three
     short, centred vertical lines. Click/drag to seek."""

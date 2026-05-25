@@ -17,7 +17,7 @@ from .spectrum import SpectrumCapture  # noqa: E402
 from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
-from .widgets import window_title_bar, make_button, set_led, SeekBar  # noqa: E402
+from .widgets import window_title_bar, make_button, set_led, SeekBar, StatusIndicator  # noqa: E402
 
 APP_ID = "codes.vonholten.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
@@ -95,11 +95,20 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         info.add_css_class("eaa-display")
         left_cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        left_cell.set_valign(Gtk.Align.CENTER)
+        # top row: status indicator (left) + clock pushed to the top-right
+        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.status = StatusIndicator()
+        self.status.set_valign(Gtk.Align.START)
+        top_row.append(self.status)
+        top_row.append(Gtk.Box(hexpand=True))
         self.lcd_time = self._mk(Gtk.Label(label="00:00"), "eaa-bignum")
-        left_cell.append(self.lcd_time)
+        self.lcd_time.set_valign(Gtk.Align.START)
+        self.lcd_time.set_halign(Gtk.Align.END)
+        top_row.append(self.lcd_time)
+        left_cell.append(top_row)
         self.scope = Gtk.DrawingArea()       # mini bar-graph scope under the timer
-        self.scope.set_content_height(20)
+        self.scope.set_content_height(40)
+        self.scope.set_content_width(150)
         self.scope.set_hexpand(True)
         self.scope.set_draw_func(self._draw_scope)
         left_cell.append(self.scope)
@@ -332,6 +341,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.ind_state.set_text(state)
         (self.ind_state.add_css_class if state == "PLAY"
          else self.ind_state.remove_css_class)("on")
+        self.status.set_state(state.lower())
 
     def _do_seek(self, frac):
         if self.track >= 0:
