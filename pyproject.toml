@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easyamp"
+version = "0.2.0"
+description = "Classic-player-style media player with a built-in 10-band EQ (GTK4)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "VonHoltenCodes (Trenton Von Holten)" },
+]
+# numpy is the only pure-Python dependency. GTK4/PyGObject and GStreamer are
+# native system libraries — see INSTALL.md (they cannot be pip-installed
+# reliably and must come from the OS package manager / Homebrew).
+dependencies = ["numpy>=1.21"]
+
+[project.urls]
+Homepage = "https://github.com/VonHoltenCodes/EasyAmp"
+
+# Provides an `easyamp` GUI launcher on PATH after install.
+[project.gui-scripts]
+easyamp = "easyamp.app:main"
+
+[tool.setuptools]
+packages = ["easyamp"]
+
+[tool.setuptools.package-data]
+easyamp = ["style.css", "fonts/*.ttf", "fonts/*.txt"]

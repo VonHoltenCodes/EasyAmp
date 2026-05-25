@@ -28,7 +28,20 @@ EasyAmp plays your local music through its own GStreamer pipeline (with a built-
 - **EasyEffects** (optional) — for the system-EQ controls
 - Fonts (OFL, optional but recommended) in `~/.local/share/fonts`: **DSEG7 Classic** and **Pixelify Sans**
 
-## Run
+## Install
+
+See **[INSTALL.md](INSTALL.md)** for full per-OS instructions. In short: install
+the native prerequisites (GTK4 + PyGObject + GStreamer) from your OS package
+manager / Homebrew, then:
+
+```bash
+pipx install . --system-site-packages    # gives you an `easyamp` launcher
+```
+
+Bundled fonts (DSEG7, Pixelify Sans — both SIL OFL) are copied into your user
+font directory on first run, so the intended look shows up with no manual setup.
+
+## Run (without installing)
 
 ```bash
 ./run.sh

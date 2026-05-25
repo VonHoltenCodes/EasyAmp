@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=EasyAmp
+GenericName=Music Player
+Comment=Classic-player-style media player with a 10-band EQ
+Exec=easyamp
+Icon=easyamp
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;player;equalizer;eq;audio;

@@ -619,6 +619,8 @@ class EasyAmpApp(Gtk.Application):
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
+        from .fontload import ensure_fonts
+        ensure_fonts()
         provider = Gtk.CssProvider()
         provider.load_from_path(STYLE)
         Gtk.StyleContext.add_provider_for_display(

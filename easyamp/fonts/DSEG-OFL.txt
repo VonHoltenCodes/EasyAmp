@@ -1,0 +1,16 @@
+DSEG 7-Segment Font
+===================
+
+Copyright (c) 2020, keshikan (https://www.keshikan.net),
+with Reserved Font Name "DSEG".
+
+This font is licensed under the SIL Open Font License, Version 1.1.
+The full text of the SIL Open Font License 1.1 is reproduced in this
+directory (see PixelifySans-OFL.txt) and is available at:
+    https://scripts.sil.org/OFL
+
+Source / project page:
+    https://github.com/keshikan/DSEG
+
+The bundled files are DSEG7 Classic (Regular, Bold), used by EasyAmp for
+its 7-segment LCD readouts.
