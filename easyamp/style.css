@@ -1,0 +1,117 @@
+/* ============================================
+   EasyAmp shell — classic-player skin
+   Gunmetal chrome + green 7-segment LCD.
+   Original art; no trademarked names/logos/bitmaps.
+   ============================================ */
+
+window.easyamp {
+  background-color: #2d2d2d;
+  background-image: linear-gradient(180deg, #383838 0%, #2d2d2d 45%, #242424 100%);
+  color: #d2d2d2;
+  font-family: "Pixelify Sans", "Noto Sans", sans-serif;
+}
+
+/* ---- Title bar ---- */
+.eaa-titlebar {
+  background-image: linear-gradient(180deg, #2a2a2a 0%, #141414 100%);
+  border-bottom: 1px solid #0a0a0a;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  padding: 4px 8px;
+}
+
+.eaa-title {
+  color: #8be88b;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-shadow: 0 0 6px rgba(26,224,26,0.6), 1px 1px 0 rgba(0,0,0,0.9);
+}
+
+/* ---- LCD display panel ---- */
+.eaa-display {
+  background-color: #000000;
+  border-top: 1px solid #0a0a0a;
+  border-left: 1px solid #0a0a0a;
+  border-right: 1px solid #3a3a3a;
+  border-bottom: 1px solid #3a3a3a;
+  box-shadow: inset 0 0 12px rgba(0,0,0,0.95);
+  padding: 8px 12px;
+}
+
+.eaa-lcd {
+  color: #1ae01a;
+  font-family: "DSEG7 Classic", "Pixelify Sans", monospace;
+  font-size: 20px;
+  text-shadow: 0 0 7px rgba(26,224,26,0.8);
+  letter-spacing: 2px;
+}
+
+.eaa-lcd-label {
+  color: #6fae6f;
+  font-family: "Pixelify Sans", sans-serif;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+/* ---- Beveled metal buttons ---- */
+.eaa-button {
+  background-image: linear-gradient(180deg, #444 0%, #303030 100%);
+  color: #dcdcdc;
+  border-top: 1px solid #5c5c5c;
+  border-left: 1px solid #5c5c5c;
+  border-right: 1px solid #0c0c0c;
+  border-bottom: 1px solid #0c0c0c;
+  border-radius: 1px;
+  padding: 4px 10px;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.10);
+}
+
+.eaa-button:hover {
+  background-image: linear-gradient(180deg, #4d4d4d 0%, #363636 100%);
+  color: #ffffff;
+}
+
+.eaa-button:active,
+.eaa-button.active {
+  background-image: linear-gradient(180deg, #242424 0%, #2e2e2e 100%);
+  color: #1ae01a;
+  border-top: 1px solid #0c0c0c;
+  border-left: 1px solid #0c0c0c;
+  border-right: 1px solid #5c5c5c;
+  border-bottom: 1px solid #5c5c5c;
+  text-shadow: 0 0 6px rgba(26,224,26,0.8);
+  box-shadow: inset 1px 1px 3px rgba(0,0,0,0.7);
+}
+
+/* power/bypass indicator dot */
+.eaa-led {
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 6px;
+  background-color: #0c3a0c;
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.8);
+}
+
+.eaa-led.on {
+  background-image: radial-gradient(circle, #2bff2b 30%, #15c015 75%);
+  box-shadow: 0 0 10px rgba(26,224,26,1);
+}
+
+/* dropdown */
+.eaa-combo,
+.eaa-combo > button {
+  background-image: linear-gradient(180deg, #3a3a3a 0%, #2c2c2c 100%);
+  color: #d2d2d2;
+  border: 1px solid #0c0c0c;
+  border-radius: 1px;
+}
+
+/* spectrum frame */
+.eaa-viz {
+  background-color: #000000;
+  border-top: 1px solid #0a0a0a;
+  border-left: 1px solid #0a0a0a;
+  border-right: 1px solid #3a3a3a;
+  border-bottom: 1px solid #3a3a3a;
+  box-shadow: inset 0 0 12px rgba(0,0,0,0.95);
+}
