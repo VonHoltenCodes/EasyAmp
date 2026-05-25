@@ -120,6 +120,13 @@ class EasyEffects:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
 
+    def show_window(self) -> None:
+        """Raise/open the real EasyEffects window (the full equalizer)."""
+        subprocess.Popen(
+            _ee_cmd(),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
     # ---- spectrum settings (used later by the visualizer) --------------
     def spectrum_color(self) -> tuple[float, float, float, float]:
         raw = _gsettings(["get", f"{APP_ID}.spectrum", "color"])
