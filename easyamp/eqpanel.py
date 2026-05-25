@@ -37,6 +37,10 @@ class EQPanel(Gtk.Box):
         self.eq = EQWidget(on_change=self._on_change)
         self.eq.add_css_class("eaa-eqbank")
         self.append(self.eq)
+        # load the user's default EQ curve on startup, if saved
+        if "EASYAMP DEFAULT" in eqpresets.list_presets():
+            preamp, bands = eqpresets.load("EASYAMP DEFAULT")
+            self.eq.set_values(preamp, bands)
         self._push()
 
     # ---- presets popover ---------------------------------------------

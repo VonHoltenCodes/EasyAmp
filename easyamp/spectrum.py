@@ -107,8 +107,12 @@ class SpectrumCapture:
             vu_r = vu_r * 0.7 + lvl(right) * 0.3
             self.vu = (vu_l, vu_r)
 
+            # decimated time-domain waveform for the mini scope
+            step = max(1, FFT // 64)
+            wave = mono[::step][:64].astype(np.float32).copy()
+
             if self.on_data:
-                GLib.idle_add(self.on_data, smoothed.copy(), (vu_l, vu_r))
+                GLib.idle_add(self.on_data, smoothed.copy(), (vu_l, vu_r), wave)
 
     def stop(self) -> None:
         self._stop.set()

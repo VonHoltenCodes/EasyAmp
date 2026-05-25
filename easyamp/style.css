@@ -28,22 +28,22 @@ window.easyamp {
     rgba(0,0,0,0.16) 2px, rgba(0,0,0,0.16) 3px);
   border-top: 1px solid #7d8ec0;
   border-bottom: 1px solid #090b14;
-  padding: 2px 6px;
-  min-height: 18px;
+  padding: 3px 6px;
+  min-height: 24px;
 }
 
 .eaa-title {
-  color: #aeb8e0;
+  color: #c2ccf0;
   font-weight: bold;
-  font-size: 11px;
+  font-size: 15px;
   letter-spacing: 3px;
   text-shadow: 0 1px 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(255,255,255,0.15);
 }
 
 .eaa-panelbar-label {
-  color: #9aa6d4;
+  color: #b2bce8;
   font-weight: bold;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 2px;
   text-shadow: 0 1px 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(255,255,255,0.12);
 }
@@ -218,18 +218,18 @@ window.easyamp {
 
 /* ===== playlist ===== */
 .eaa-playlist {
-  background-color: #000000;
+  background-color: #0a0a10;
   border-top: 1px solid #000; border-left: 1px solid #000;
   border-right: 1px solid #2a2a32; border-bottom: 1px solid #2a2a32;
-  box-shadow: inset 0 0 12px rgba(0,0,0,1);
+  box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
 }
 .eaa-playlist row { background-color: transparent; padding: 0; }
 .eaa-playlist row:selected { background-color: #1b3aa0; }
 .eaa-track {
   color: #1eff1e;
   font-family: "Pixelify Sans", monospace;
-  font-size: 12px;
-  padding: 0 5px;
+  font-size: 14px;
+  padding: 1px 5px;
   text-shadow: 0 0 4px rgba(30,255,30,0.4);
 }
 .eaa-playlist row:selected .eaa-track { color: #ffffff; text-shadow: 0 0 5px rgba(150,180,255,0.7); }

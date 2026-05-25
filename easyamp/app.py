@@ -17,7 +17,7 @@ from .spectrum import SpectrumCapture  # noqa: E402
 from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
-from .widgets import window_title_bar, make_button, set_led  # noqa: E402
+from .widgets import window_title_bar, make_button, set_led, SeekBar  # noqa: E402
 
 APP_ID = "codes.vonholten.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
@@ -71,6 +71,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self._levels = np.zeros(BANDS, dtype=np.float32)
         self._peaks = np.zeros(BANDS, dtype=np.float32)
         self._vu = (0.0, 0.0)
+        self._wave = np.zeros(64, dtype=np.float32)
         self._viz_mode = "spec"
         self._presets: list[str] = []
         self._ee_suppress = False
@@ -93,9 +94,16 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         # ---- display ----
         info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         info.add_css_class("eaa-display")
+        left_cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        left_cell.set_valign(Gtk.Align.CENTER)
         self.lcd_time = self._mk(Gtk.Label(label="00:00"), "eaa-bignum")
-        self.lcd_time.set_valign(Gtk.Align.CENTER)
-        info.append(self.lcd_time)
+        left_cell.append(self.lcd_time)
+        self.scope = Gtk.DrawingArea()       # mini waveform under the timer
+        self.scope.set_content_height(14)
+        self.scope.set_hexpand(True)
+        self.scope.set_draw_func(self._draw_scope)
+        left_cell.append(self.scope)
+        info.append(left_cell)
         lcd = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         lcd.set_hexpand(True)
         lcd.set_valign(Gtk.Align.CENTER)
@@ -115,10 +123,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.marquee_lbl.set_max_width_chars(MARQUEE_WIDTH)
         lcd.append(self.marquee_lbl)
         self.marquee = Marquee(self.marquee_lbl)
-        self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1000, 1)
-        self.seek.add_css_class("eaa-seek")
-        self.seek.set_draw_value(False)
-        self.seek.connect("value-changed", self.on_seek)
+        self.seek = SeekBar(on_seek=self._do_seek)
         lcd.append(self.seek)
         info.append(lcd)
         left.append(info)
@@ -301,9 +306,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.btn_play.set_label("⏵")
         self._set_state("STOP")
         self.lcd_time.set_text("00:00")
-        self._suppress_seek = True
-        self.seek.set_value(0)
-        self._suppress_seek = False
+        self.seek.set_fraction(0)
 
     def on_prev(self, _b):
         if self.player.position() > 3_000_000_000:
@@ -330,10 +333,9 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         (self.ind_state.add_css_class if state == "PLAY"
          else self.ind_state.remove_css_class)("on")
 
-    def on_seek(self, scale):
-        if self._suppress_seek or self.track < 0:
-            return
-        self.player.seek_fraction(scale.get_value() / 1000.0)
+    def _do_seek(self, frac):
+        if self.track >= 0:
+            self.player.seek_fraction(frac)
 
     def _tick_position(self):
         if self.track >= 0:
