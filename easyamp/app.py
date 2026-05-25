@@ -1,5 +1,5 @@
-"""EasyAmp — a classic-player-style media player (player + EQ + playlist)
-with EasyEffects system-EQ controls and a system-wide spectrum/VU display."""
+"""EasyAmp — a self-contained classic-player-style media player with a
+built-in 10-band EQ, playlist, and a system-wide spectrum/VU display."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gdk, Gio, GLib  # noqa: E402
 import numpy as np  # noqa: E402
 
-from .backend import EasyEffects  # noqa: E402
 from .spectrum import SpectrumCapture  # noqa: E402
 from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
@@ -62,9 +61,8 @@ class Marquee:
 
 
 class EasyAmpWindow(Gtk.ApplicationWindow):
-    def __init__(self, app, ee):
+    def __init__(self, app):
         super().__init__(application=app, title="EasyAmp")
-        self.ee = ee
         self.player = Player(on_tags=self._on_tags, on_eos=self._on_eos)
         self.playlist: list[str] = []
         self.track = -1
@@ -74,8 +72,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self._vu = (0.0, 0.0)
         self._wave = np.zeros(64, dtype=np.float32)
         self._viz_mode = "spec"
-        self._presets: list[str] = []
-        self._ee_suppress = False
 
         self.add_css_class("easyamp")
         self.set_resizable(True)
@@ -176,22 +172,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.eq_panel = EQPanel(self.player)
         left.append(self.eq_panel)
 
-        # ---- system EQ (EasyEffects) strip ----
-        eerow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        eerow.add_css_class("eaa-transport")
-        eerow.append(self._mk(Gtk.Label(label="SYS"), "eaa-ind", "on"))
-        self.preset_model = Gtk.StringList()
-        self.dropdown = Gtk.DropDown(model=self.preset_model)
-        self.dropdown.add_css_class("eaa-combo")
-        self.dropdown.set_hexpand(True)
-        self.dropdown.connect("notify::selected", self.on_ee_preset)
-        eerow.append(self.dropdown)
-        self.btn_bypass = Gtk.Button(label="BYPASS")
-        self.btn_bypass.add_css_class("eaa-button")
-        self.btn_bypass.connect("clicked", self.on_ee_bypass)
-        eerow.append(self.btn_bypass)
-        left.append(eerow)
-
         # ---- playlist (docked right) ----
         self.playlist_panel = PlaylistPanel(
             on_play=self._play_track, on_add=self._pl_add,
@@ -205,7 +185,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.connect("map", lambda *_: self.spectrum.start())
         self.connect("close-request", self._on_close)
         self._pos_src = GLib.timeout_add(250, self._tick_position)
-        GLib.idle_add(self.refresh_ee)
 
     # ---- tiny builders ------------------------------------------------
     @staticmethod
@@ -573,36 +552,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         cr.move_to(x + w - vu.width - 6, y + h - 5)
         cr.show_text("VU")
 
-    # ---- EasyEffects system controls ---------------------------------
-    def refresh_ee(self):
-        self.ee.ensure_running()
-        self._presets = self.ee.list_presets().output
-        while self.preset_model.get_n_items():
-            self.preset_model.remove(0)
-        for name in self._presets:
-            self.preset_model.append(name)
-        active = self.ee.active_preset("output")
-        if active in self._presets:
-            self._ee_suppress = True
-            self.dropdown.set_selected(self._presets.index(active))
-            self._ee_suppress = False
-        self._set_bypass_ui(self.ee.get_bypass())
-        return False
-
-    def _set_bypass_ui(self, bypassed):
-        (self.btn_bypass.remove_css_class if bypassed
-         else self.btn_bypass.add_css_class)("on")
-
-    def on_ee_preset(self, dropdown, _pspec):
-        if self._ee_suppress:
-            return
-        idx = dropdown.get_selected()
-        if 0 <= idx < len(self._presets):
-            self.ee.load_preset(self._presets[idx])
-
-    def on_ee_bypass(self, _b):
-        self._set_bypass_ui(self.ee.toggle_bypass())
-
     def _on_close(self, *_):
         if self._pos_src:
             GLib.source_remove(self._pos_src)
@@ -615,7 +564,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 class EasyAmpApp(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
-        self.ee = EasyEffects()
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -627,7 +575,7 @@ class EasyAmpApp(Gtk.Application):
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def do_activate(self):
-        win = self.props.active_window or EasyAmpWindow(self, self.ee)
+        win = self.props.active_window or EasyAmpWindow(self)
         win.present()
 
 
