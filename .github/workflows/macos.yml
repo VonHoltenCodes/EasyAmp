@@ -1,0 +1,72 @@
+name: macOS
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build macOS .app/.dmg
+    runs-on: macos-14   # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTK/GStreamer (Homebrew)
+        run: |
+          brew update
+          brew install gtk4 pygobject3 gstreamer \
+            gst-plugins-base gst-plugins-good \
+            adwaita-icon-theme librsvg create-dmg
+
+      - name: Python env (sees Homebrew gi, builds the bundle)
+        run: |
+          PYBIN="$(brew --prefix)/bin/python3"
+          "$PYBIN" -m venv --system-site-packages venv
+          source venv/bin/activate
+          python -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk, Gst; print('gi OK')"
+          pip install --upgrade pip
+          pip install pyinstaller pyinstaller-hooks-contrib numpy .
+
+      - name: Build .icns from the logo
+        run: |
+          rsvg-convert -w 1024 -h 1024 assets/easyamp-logo.svg -o /tmp/ea1024.png
+          mkdir -p EasyAmp.iconset
+          for s in 16 32 128 256 512; do
+            sips -z $s $s        /tmp/ea1024.png --out EasyAmp.iconset/icon_${s}x${s}.png
+            sips -z $((s*2)) $((s*2)) /tmp/ea1024.png --out EasyAmp.iconset/icon_${s}x${s}@2x.png
+          done
+          iconutil -c icns EasyAmp.iconset -o packaging/macos/easyamp.icns
+
+      - name: Build the .app
+        run: |
+          source venv/bin/activate
+          cd packaging/macos
+          pyinstaller --noconfirm --clean EasyAmp.spec
+
+      - name: Package the .dmg
+        run: |
+          create-dmg \
+            --volname "EasyAmp" \
+            --window-size 540 360 \
+            --icon-size 96 \
+            --app-drop-link 380 170 \
+            --icon "EasyAmp.app" 150 170 \
+            "EasyAmp-macos-arm64.dmg" \
+            "packaging/macos/dist/EasyAmp.app" || \
+          create-dmg "EasyAmp-macos-arm64.dmg" "packaging/macos/dist/EasyAmp.app"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyAmp-macos-arm64
+          path: EasyAmp-macos-arm64.dmg
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EasyAmp-macos-arm64.dmg
