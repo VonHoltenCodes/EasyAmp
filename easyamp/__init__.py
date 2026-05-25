@@ -1,3 +1,3 @@
 """EasyAmp — a self-contained classic-player-style media player with EQ."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
