@@ -103,14 +103,14 @@ setup is needed.
 ```bash
 # one-time: build tooling + runtimes
 sudo apt install flatpak-builder            # or your distro's package
-flatpak install --user flathub org.gnome.Platform//48 org.gnome.Sdk//48
+flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 
 # build + install
 cd packaging
-flatpak-builder --user --install --force-clean build-dir codes.vonholten.EasyAmp.yaml
+flatpak-builder --user --install --force-clean build-dir com.vonholtencodes.EasyAmp.yaml
 
 # run
-flatpak run codes.vonholten.EasyAmp
+flatpak run com.vonholtencodes.EasyAmp
 ```
 
 Audio (playback + the visualizer's monitor capture) goes through the

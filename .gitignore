@@ -5,3 +5,11 @@ __pycache__/
 build/
 dist/
 *.log
+
+# flatpak build artifacts
+.flatpak-builder/
+packaging/.flatpak-builder/
+packaging/**/.flatpak-builder/
+builddir/
+repo/
+.flatpak/

@@ -16,7 +16,7 @@ jobs:
     name: Build Flatpak bundle
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
       options: --privileged
     steps:
       - name: Checkout
@@ -26,7 +26,7 @@ jobs:
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: EasyAmp.flatpak
-          manifest-path: packaging/codes.vonholten.EasyAmp.yaml
+          manifest-path: packaging/com.vonholtencodes.EasyAmp.yaml
           cache-key: flatpak-builder-${{ github.sha }}
 
       # Always keep the bundle as a build artifact (handy for PRs / manual runs)

@@ -20,7 +20,7 @@ from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
 from .widgets import window_title_bar, make_button, set_led, SeekBar, StatusIndicator  # noqa: E402
 
-APP_ID = "codes.vonholten.EasyAmp"
+APP_ID = "com.vonholtencodes.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
 MARQUEE_WIDTH = 24
 BANDS = 20
