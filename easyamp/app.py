@@ -358,12 +358,28 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         set_led(self.btn_viz, self._viz_mode == "vu")
         self.viz.queue_draw()
 
-    def _on_data(self, levels, vu):
+    def _on_data(self, levels, vu, wave):
         self._levels = levels
         self._peaks = np.maximum(levels, self._peaks - 0.015)
         self._vu = vu
+        self._wave = wave
         self.viz.queue_draw()
+        self.scope.queue_draw()
         return False
+
+    def _draw_scope(self, _a, cr, w, h):
+        wave = self._wave
+        n = len(wave)
+        if n < 2 or w <= 0 or h <= 0:
+            return
+        cr.set_source_rgb(0.10, 0.92, 0.16)
+        cr.set_line_width(1)
+        mid = h / 2
+        for i in range(n):
+            x = w * i / (n - 1)
+            y = mid - float(wave[i]) * (h * 0.46)
+            cr.line_to(x, y) if i else cr.move_to(x, y)
+        cr.stroke()
 
     def _draw_viz(self, _area, cr, w, h):
         cr.set_source_rgb(0, 0, 0)
