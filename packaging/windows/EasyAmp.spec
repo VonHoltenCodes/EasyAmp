@@ -39,6 +39,10 @@ for ns, ver in [
 hiddenimports += [
     "gi",
     "cairo",
+    # The foreign-struct converter that lets GTK pass a cairo.Context to
+    # Python draw callbacks. PyInstaller misses it, which makes every Cairo
+    # draw raise "Couldn't find foreign struct converter for 'cairo.Context'".
+    "gi._gi_cairo",
     "gi.repository.GLib",
     "gi.repository.GObject",
     "gi.repository.Gio",
