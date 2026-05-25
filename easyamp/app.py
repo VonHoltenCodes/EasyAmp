@@ -1,4 +1,5 @@
-"""EasyAmp — a classic-player-style shell that remote-controls EasyEffects."""
+"""EasyAmp — a classic-player-style media player with a 10-band EQ,
+plus EasyEffects system-EQ controls, and a system-wide spectrum/VU display."""
 
 from __future__ import annotations
 
@@ -13,16 +14,23 @@ import numpy as np  # noqa: E402
 
 from .backend import EasyEffects  # noqa: E402
 from .spectrum import SpectrumCapture  # noqa: E402
+from .player import Player  # noqa: E402
+from .eqwindow import EQWindow  # noqa: E402
 
 APP_ID = "codes.vonholten.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
-MARQUEE_WIDTH = 24
+MARQUEE_WIDTH = 26
 BANDS = 20
+AUDIO_PATTERNS = ("*.mp3", "*.flac", "*.wav", "*.ogg", "*.opus",
+                  "*.m4a", "*.aac", "*.wma", "*.mp4")
+
+
+def _fmt(ns: int) -> str:
+    s = max(0, int(ns // 1_000_000_000))
+    return f"{s // 60:02d}:{s % 60:02d}"
 
 
 class Marquee:
-    """Scrolls long text across a fixed-width label, player-display style."""
-
     def __init__(self, label: Gtk.Label, width: int = MARQUEE_WIDTH, interval: int = 220):
         self.label = label
         self.width = width
@@ -55,21 +63,27 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application, ee: EasyEffects):
         super().__init__(application=app, title="EasyAmp")
         self.ee = ee
-        self._presets: list[str] = []
-        self._idx = -1
-        self._suppress = False
-        self._seek_src: int | None = None
+        self.player = Player(on_tags=self._on_tags, on_eos=self._on_eos)
+        self.playlist: list[str] = []
+        self.track = -1
+        self._playing = False
+        self._suppress_seek = False
+        self._eq_win: EQWindow | None = None
+
         self._levels = np.zeros(BANDS, dtype=np.float32)
         self._peaks = np.zeros(BANDS, dtype=np.float32)
         self._vu = (0.0, 0.0)
-        self._viz_mode = "spec"  # "spec" or "vu"
+        self._viz_mode = "spec"
+
+        # EasyEffects (system EQ) state
+        self._presets: list[str] = []
+        self._ee_suppress = False
 
         self.add_css_class("easyamp")
         self.set_resizable(True)
-        self.set_default_size(640, 360)
-        self.set_size_request(500, 300)
+        self.set_default_size(660, 400)
+        self.set_size_request(520, 340)
 
-        # ---- draggable title bar (WindowHandle makes it a drag region) ----
         bar = Gtk.CenterBox()
         bar.add_css_class("eaa-titlebar")
         title = Gtk.Label(label="E A S Y A M P")
@@ -81,45 +95,43 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.set_titlebar(handle)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        root.set_margin_top(8)
-        root.set_margin_bottom(8)
-        root.set_margin_start(8)
-        root.set_margin_end(8)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(root, f"set_margin_{m}")(8)
         self.set_child(root)
 
-        # ---- info strip: big number + indicators + marquee + seek ----
-        info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # ---- display: time + now-playing + pipeline indicators + seek ----
+        info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         info.add_css_class("eaa-display")
 
-        self.lcd_num = Gtk.Label(label="00")
-        self.lcd_num.add_css_class("eaa-bignum")
-        self.lcd_num.set_valign(Gtk.Align.CENTER)
-        info.append(self.lcd_num)
+        self.lcd_time = Gtk.Label(label="00:00")
+        self.lcd_time.add_css_class("eaa-bignum")
+        self.lcd_time.set_valign(Gtk.Align.CENTER)
+        info.append(self.lcd_time)
 
         lcd = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         lcd.set_hexpand(True)
         lcd.set_valign(Gtk.Align.CENTER)
 
         inds = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        self.ind_state = Gtk.Label(label="ACTIVE")
+        self.ind_state = Gtk.Label(label="STOP")
         self.ind_state.add_css_class("eaa-ind")
-        self.ind_chan = Gtk.Label(label="STEREO")
+        self.ind_kbps = Gtk.Label(label="--K")
+        self.ind_kbps.add_css_class("eaa-ind")
+        self.ind_khz = Gtk.Label(label="--K")
+        self.ind_khz.add_css_class("eaa-ind")
+        self.ind_chan = Gtk.Label(label="--", xalign=1)
         self.ind_chan.add_css_class("eaa-ind")
-        self.ind_chan.add_css_class("on")
-        self.ind_num = Gtk.Label(label="OF --", xalign=1)
-        self.ind_num.add_css_class("eaa-ind")
-        self.ind_num.set_hexpand(True)
-        inds.append(self.ind_state)
-        inds.append(self.ind_chan)
-        inds.append(self.ind_num)
+        self.ind_chan.set_hexpand(True)
+        for w in (self.ind_state, self.ind_kbps, self.ind_khz, self.ind_chan):
+            inds.append(w)
         lcd.append(inds)
 
-        self.marquee_lbl = Gtk.Label(label="--", xalign=0)
+        self.marquee_lbl = Gtk.Label(label="EASYAMP  *  READY", xalign=0)
         self.marquee_lbl.add_css_class("eaa-lcd")
         lcd.append(self.marquee_lbl)
         self.marquee = Marquee(self.marquee_lbl)
 
-        self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1)
+        self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1000, 1)
         self.seek.add_css_class("eaa-seek")
         self.seek.set_draw_value(False)
         self.seek.connect("value-changed", self.on_seek)
@@ -128,7 +140,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         info.append(lcd)
         root.append(info)
 
-        # ---- large expanding visualizer panel ----
+        # ---- visualizer ----
         self.viz = Gtk.DrawingArea()
         self.viz.add_css_class("eaa-viz")
         self.viz.set_vexpand(True)
@@ -137,134 +149,186 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.viz.set_draw_func(self._draw_viz)
         root.append(self.viz)
 
-        # ---- transport row ----
+        # ---- player transport ----
         xport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         xport.add_css_class("eaa-transport")
-
+        self.btn_open = self._xport_btn("⏏", self.on_open)
         self.btn_prev = self._xport_btn("⏮", self.on_prev)
-        self.btn_bypass = self._xport_btn("⏵", self.on_bypass)
+        self.btn_play = self._xport_btn("⏵", self.on_playpause)
+        self.btn_stop = self._xport_btn("⏹", self.on_stop)
         self.btn_next = self._xport_btn("⏭", self.on_next)
-        xport.append(self.btn_prev)
-        xport.append(self.btn_bypass)
-        xport.append(self.btn_next)
+        for b in (self.btn_open, self.btn_prev, self.btn_play, self.btn_stop, self.btn_next):
+            xport.append(b)
+        xport.append(self._sep())
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        sep.add_css_class("eaa-xsep")
-        xport.append(sep)
+        self.btn_eq = Gtk.Button(label="EQ")
+        self.btn_eq.add_css_class("eaa-button")
+        self.btn_eq.connect("clicked", self.on_eq)
+        xport.append(self.btn_eq)
 
         self.btn_viz = Gtk.Button(label="VU")
         self.btn_viz.add_css_class("eaa-button")
-        self.btn_viz.set_tooltip_text("Toggle spectrum / VU meters")
         self.btn_viz.connect("clicked", self.on_toggle_viz)
         xport.append(self.btn_viz)
+        xport.append(Gtk.Box(hexpand=True))  # spacer
+        root.append(xport)
 
+        # ---- EasyEffects system-EQ strip ----
+        eerow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        eerow.add_css_class("eaa-transport")
+        sys_lbl = Gtk.Label(label="SYSTEM EQ")
+        sys_lbl.add_css_class("eaa-ind")
+        sys_lbl.add_css_class("on")
+        eerow.append(sys_lbl)
         self.preset_model = Gtk.StringList()
         self.dropdown = Gtk.DropDown(model=self.preset_model)
         self.dropdown.add_css_class("eaa-combo")
         self.dropdown.set_hexpand(True)
-        self.dropdown.connect("notify::selected", self.on_dropdown)
-        xport.append(self.dropdown)
+        self.dropdown.connect("notify::selected", self.on_ee_preset)
+        eerow.append(self.dropdown)
+        self.btn_bypass = Gtk.Button(label="BYPASS")
+        self.btn_bypass.add_css_class("eaa-button")
+        self.btn_bypass.connect("clicked", self.on_ee_bypass)
+        eerow.append(self.btn_bypass)
+        root.append(eerow)
 
-        root.append(xport)
-
-        # spectrum lifecycle
+        # lifecycle
         self.spectrum = SpectrumCapture(bands=BANDS, on_data=self._on_data)
         self.connect("map", lambda *_: self.spectrum.start())
         self.connect("close-request", self._on_close)
+        self._pos_src = GLib.timeout_add(250, self._tick_position)
+        GLib.idle_add(self.refresh_ee)
 
-        GLib.idle_add(self.refresh)
-
-    def _xport_btn(self, glyph: str, cb) -> Gtk.Button:
+    # ---- helpers ------------------------------------------------------
+    def _xport_btn(self, glyph, cb):
         b = Gtk.Button(label=glyph)
         b.add_css_class("eaa-xport")
         b.connect("clicked", cb)
         return b
 
-    # ---- state sync ---------------------------------------------------
-    def refresh(self) -> bool:
-        self.ee.ensure_running()
-        self._presets = self.ee.list_presets().output
-        while self.preset_model.get_n_items():
-            self.preset_model.remove(0)
-        for name in self._presets:
-            self.preset_model.append(name)
-        self.seek.set_range(0, max(0, len(self._presets) - 1))
+    def _sep(self):
+        s = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        s.add_css_class("eaa-xsep")
+        return s
 
-        active = self.ee.active_preset("output")
-        idx = self._presets.index(active) if active in self._presets else 0
-        self._go_to(idx, load=False)
-        self._set_bypass_ui(self.ee.get_bypass())
-        return False
+    # ---- player: file / playlist -------------------------------------
+    def on_open(self, _b):
+        dialog = Gtk.FileDialog(title="Open audio")
+        flt = Gtk.FileFilter()
+        flt.set_name("Audio files")
+        for p in AUDIO_PATTERNS:
+            flt.add_pattern(p)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(flt)
+        dialog.set_filters(filters)
+        dialog.open_multiple(self, None, self._on_open_done)
 
-    def _go_to(self, idx: int, load: bool) -> None:
-        if not self._presets:
+    def _on_open_done(self, dialog, result):
+        try:
+            files = dialog.open_multiple_finish(result)
+        except GLib.Error:
             return
-        self._idx = idx % len(self._presets)
-        name = self._presets[self._idx]
-        self._suppress = True
-        self.dropdown.set_selected(self._idx)
-        self.seek.set_value(self._idx)
-        self._suppress = False
-        self.marquee.set_text(name)
-        self.lcd_num.set_text(f"{self._idx + 1:02d}")
-        self.ind_num.set_text(f"OF {len(self._presets):02d}")
-        if load:
-            self.ee.load_preset(name)
+        paths = [files.get_item(i).get_path() for i in range(files.get_n_items())]
+        paths = [p for p in paths if p]
+        if paths:
+            self.playlist = paths
+            self._play_track(0)
 
-    def _set_bypass_ui(self, bypassed: bool) -> None:
-        self.btn_bypass.set_label("⏹" if bypassed else "⏵")
-        if bypassed:
-            self.btn_bypass.remove_css_class("playing")
-            self.ind_state.set_text("BYPASS")
-            self.ind_state.remove_css_class("on")
-        else:
-            self.btn_bypass.add_css_class("playing")
-            self.ind_state.set_text("ACTIVE")
-            self.ind_state.add_css_class("on")
+    def _play_track(self, idx: int):
+        if not (0 <= idx < len(self.playlist)):
+            return
+        self.track = idx
+        path = self.playlist[idx]
+        self.player.load(path)
+        self.player.play()
+        self._playing = True
+        self._set_state("PLAY")
+        self.btn_play.set_label("⏸")
+        self.marquee.set_text(os.path.splitext(os.path.basename(path))[0])
 
-    # ---- handlers -----------------------------------------------------
+    def on_playpause(self, _b):
+        if self.track < 0 and self.playlist:
+            self._play_track(0)
+            return
+        if self.track < 0:
+            return
+        self.player.toggle()
+        self._playing = self.player.is_playing()
+        self.btn_play.set_label("⏸" if self._playing else "⏵")
+        self._set_state("PLAY" if self._playing else "PAUSE")
+
+    def on_stop(self, _b):
+        self.player.stop()
+        self._playing = False
+        self.btn_play.set_label("⏵")
+        self._set_state("STOP")
+        self.lcd_time.set_text("00:00")
+        self._suppress_seek = True
+        self.seek.set_value(0)
+        self._suppress_seek = False
+
     def on_prev(self, _b):
-        self._go_to((self._idx - 1) if self._idx >= 0 else 0, load=True)
+        if self.player.position() > 3_000_000_000:  # >3s -> restart track
+            self.player.seek_fraction(0.0)
+        elif self.track > 0:
+            self._play_track(self.track - 1)
 
     def on_next(self, _b):
-        self._go_to((self._idx + 1) if self._idx >= 0 else 0, load=True)
+        if self.track + 1 < len(self.playlist):
+            self._play_track(self.track + 1)
+        else:
+            self.on_stop(None)
 
-    def on_bypass(self, _b):
-        self._set_bypass_ui(self.ee.toggle_bypass())
+    def _on_eos(self):
+        self.on_next(None)
 
+    def _on_tags(self, info):
+        artist = info.get("artist", "")
+        title = info.get("title", "")
+        if title:
+            self.marquee.set_text(f"{artist} - {title}" if artist else title)
+
+    def _set_state(self, state: str):
+        self.ind_state.set_text(state)
+        if state == "PLAY":
+            self.ind_state.add_css_class("on")
+        else:
+            self.ind_state.remove_css_class("on")
+
+    def on_seek(self, scale):
+        if self._suppress_seek or self.track < 0:
+            return
+        self.player.seek_fraction(scale.get_value() / 1000.0)
+
+    def _tick_position(self) -> bool:
+        if self.track >= 0:
+            dur = self.player.duration()
+            pos = self.player.position()
+            if dur > 0:
+                self._suppress_seek = True
+                self.seek.set_value(pos / dur * 1000.0)
+                self._suppress_seek = False
+            self.lcd_time.set_text(_fmt(pos))
+            si = self.player.stream_info()
+            self.ind_khz.set_text(f"{round(si['rate'] / 1000)}K" if si["rate"] else "--K")
+            self.ind_kbps.set_text(f"{round(si['bitrate'] / 1000)}K" if si["bitrate"] else "--K")
+            self.ind_chan.set_text(
+                "STEREO" if si["channels"] == 2 else ("MONO" if si["channels"] == 1 else "--"))
+        return True
+
+    # ---- EQ window ----------------------------------------------------
+    def on_eq(self, _b):
+        if self._eq_win is None:
+            self._eq_win = EQWindow(self, self.player)
+            self._eq_win.connect("close-request", lambda *_: (setattr(self, "_eq_win", None), False)[1])
+        self._eq_win.present()
+
+    # ---- visualizer ---------------------------------------------------
     def on_toggle_viz(self, _b):
         self._viz_mode = "vu" if self._viz_mode == "spec" else "spec"
         self.btn_viz.set_label("SPEC" if self._viz_mode == "vu" else "VU")
         self.viz.queue_draw()
 
-    def on_dropdown(self, dropdown, _pspec):
-        if self._suppress:
-            return
-        self._go_to(dropdown.get_selected(), load=True)
-
-    def on_seek(self, scale):
-        if self._suppress:
-            return
-        idx = int(round(scale.get_value()))
-        if not self._presets:
-            return
-        self._idx = idx
-        self.marquee.set_text(self._presets[idx])
-        self.lcd_num.set_text(f"{idx + 1:02d}")
-        self._suppress = True
-        self.dropdown.set_selected(idx)
-        self._suppress = False
-        if self._seek_src is not None:
-            GLib.source_remove(self._seek_src)
-        self._seek_src = GLib.timeout_add(220, self._commit_seek)
-
-    def _commit_seek(self) -> bool:
-        self._seek_src = None
-        if 0 <= self._idx < len(self._presets):
-            self.ee.load_preset(self._presets[self._idx])
-        return False
-
-    # ---- visualizer ---------------------------------------------------
     def _on_data(self, levels, vu) -> bool:
         self._levels = levels
         self._peaks = np.maximum(levels, self._peaks - 0.015)
@@ -277,10 +341,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         cr.paint()
         if w <= 0 or h <= 0:
             return
-        if self._viz_mode == "vu":
-            self._draw_vu(cr, w, h)
-        else:
-            self._draw_spectrum(cr, w, h)
+        (self._draw_vu if self._viz_mode == "vu" else self._draw_spectrum)(cr, w, h)
 
     def _draw_spectrum(self, cr, w, h) -> None:
         levels, peaks = self._levels, self._peaks
@@ -305,7 +366,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
                     cr.set_source_rgb(0.12, 0.90, 0.20)
                 cr.rectangle(x, y, bw, seg_h)
                 cr.fill()
-            # falling peak cap
             ps = int(float(peaks[i]) * total)
             if ps > 0:
                 y = h - ps * (seg_h + seg_gap)
@@ -329,7 +389,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         cr.close_path()
 
     def _vu_gauge(self, cr, x, y, w, h, value, label) -> None:
-        # cream face
         cr.set_source_rgb(0.92, 0.89, 0.76)
         self._rrect(cr, x, y, w, h, 4)
         cr.fill()
@@ -341,30 +400,24 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             a = math.radians(135 - frac * 90)
             return cx + rad * math.cos(a), base_y - rad * math.sin(a)
 
-        # scale arc
         cr.set_line_width(2)
         cr.set_source_rgb(0.10, 0.10, 0.10)
         cr.move_to(*pt(0.0, r))
         for i in range(1, 41):
             cr.line_to(*pt(i / 40, r))
         cr.stroke()
-        # red overload zone (top 20%)
         cr.set_line_width(3)
         cr.set_source_rgb(0.82, 0.12, 0.10)
         cr.move_to(*pt(0.8, r))
         for i in range(1, 21):
             cr.line_to(*pt(0.8 + 0.2 * i / 20, r))
         cr.stroke()
-        # ticks
         cr.set_line_width(1.5)
         cr.set_source_rgb(0.10, 0.10, 0.10)
         for t in range(11):
-            x1, y1 = pt(t / 10, r - 5)
-            x2, y2 = pt(t / 10, r)
-            cr.move_to(x1, y1)
-            cr.line_to(x2, y2)
+            cr.move_to(*pt(t / 10, r - 5))
+            cr.line_to(*pt(t / 10, r))
             cr.stroke()
-        # needle
         nx, ny = pt(max(0.0, min(1.0, value)), r)
         cr.set_line_width(2.5)
         cr.set_source_rgb(0.05, 0.05, 0.05)
@@ -373,21 +426,55 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         cr.stroke()
         cr.arc(cx, base_y, 3, 0, 2 * math.pi)
         cr.fill()
-        # label
         cr.select_font_face("monospace")
         cr.set_font_size(11)
         cr.move_to(x + 6, y + h - 6)
         cr.show_text(label)
 
+    # ---- EasyEffects system controls ---------------------------------
+    def refresh_ee(self) -> bool:
+        self.ee.ensure_running()
+        self._presets = self.ee.list_presets().output
+        while self.preset_model.get_n_items():
+            self.preset_model.remove(0)
+        for name in self._presets:
+            self.preset_model.append(name)
+        active = self.ee.active_preset("output")
+        if active in self._presets:
+            self._ee_suppress = True
+            self.dropdown.set_selected(self._presets.index(active))
+            self._ee_suppress = False
+        self._set_bypass_ui(self.ee.get_bypass())
+        return False
+
+    def _set_bypass_ui(self, bypassed: bool):
+        if bypassed:
+            self.btn_bypass.remove_css_class("playing")
+        else:
+            self.btn_bypass.add_css_class("playing")
+
+    def on_ee_preset(self, dropdown, _pspec):
+        if self._ee_suppress:
+            return
+        idx = dropdown.get_selected()
+        if 0 <= idx < len(self._presets):
+            self.ee.load_preset(self._presets[idx])
+
+    def on_ee_bypass(self, _b):
+        self._set_bypass_ui(self.ee.toggle_bypass())
+
     def _on_close(self, *_):
+        if self._pos_src:
+            GLib.source_remove(self._pos_src)
+            self._pos_src = None
         self.spectrum.stop()
+        self.player.stop()
         return False
 
 
 class EasyAmpApp(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=APP_ID,
-                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.ee = EasyEffects()
 
     def do_startup(self):
@@ -395,10 +482,7 @@ class EasyAmpApp(Gtk.Application):
         provider = Gtk.CssProvider()
         provider.load_from_path(STYLE)
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def do_activate(self):
         win = self.props.active_window or EasyAmpWindow(self, self.ee)
