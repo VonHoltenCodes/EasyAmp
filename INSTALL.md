@@ -1,9 +1,15 @@
 # Installing EasyAmp
 
+> **Just want to run it?** Prebuilt, self-contained downloads for Windows,
+> macOS, and Linux are on the
+> **[latest release](https://github.com/VonHoltenCodes/EasyAmp/releases/latest)**
+> (see the Download table in the [README](README.md)) — no Python or GTK setup
+> required. The steps below are for **building/running from source**.
+
 EasyAmp is a GTK4 + GStreamer Python app. GTK4, PyGObject, and GStreamer are
 **native system libraries** — they come from your OS package manager (or
-Homebrew on macOS), not from pip. Once those are present, EasyAmp installs as
-a normal Python package and gives you an `easyamp` launcher.
+Homebrew on macOS, MSYS2 on Windows), not from pip. Once those are present,
+EasyAmp installs as a normal Python package and gives you an `easyamp` launcher.
 
 ---
 
@@ -86,6 +92,46 @@ easyamp
 
 ---
 
+## Windows
+
+> Most users should just grab the **[installer or portable zip](https://github.com/VonHoltenCodes/EasyAmp/releases/latest)**.
+> The steps here are for running from source.
+>
+> Unlike macOS, the visualizer works out of the box: it captures the system
+> output via **WASAPI loopback**, so no extra loopback device is needed.
+
+GTK4 for Windows comes from **[MSYS2](https://www.msys2.org/)**. Run the
+following in an **MSYS2 MINGW64** shell (not the plain MSYS or UCRT shell):
+
+### 1. System prerequisites (MSYS2 MINGW64)
+
+```bash
+pacman -S mingw-w64-x86_64-gtk4 mingw-w64-x86_64-python-gobject \
+    mingw-w64-x86_64-python-cairo mingw-w64-x86_64-gstreamer \
+    mingw-w64-x86_64-gst-plugins-base mingw-w64-x86_64-gst-plugins-good \
+    mingw-w64-x86_64-gst-plugins-bad mingw-w64-x86_64-adwaita-icon-theme \
+    mingw-w64-x86_64-python-numpy mingw-w64-x86_64-python-pip
+```
+
+> `gst-plugins-bad` provides the `wasapi2` element used for system-audio
+> capture; `adwaita-icon-theme` supplies GTK's stock icons.
+
+### 2. Install EasyAmp
+
+```bash
+# from a clone of this repo, in the MINGW64 shell
+pip install --no-deps .       # numpy/GTK already come from MSYS2
+python -m easyamp
+```
+
+### Building the installer
+
+The signed-off recipe lives in `packaging/windows/` (PyInstaller spec +
+Inno Setup script) and runs in CI via `.github/workflows/windows.yml`, which
+produces the `.exe` installer and portable `.zip` attached to each release.
+
+---
+
 ## Run without installing
 
 From a clone, with the system prerequisites present:
@@ -117,8 +163,9 @@ Audio (playback + the visualizer's monitor capture) goes through the
 `--socket=pulseaudio` permission; files open via the file-chooser portal
 (plus read-only `~/Music`).
 
-## Roadmap for packaging
+## Packaging status
 
-- **Linux:** publish the Flatpak to Flathub.
-- **macOS:** a self-contained `.app`/`.dmg` via Briefcase, plus a native
-  CoreAudio capture backend for the visualizer.
+- **Windows:** ✅ Inno Setup installer + portable zip (PyInstaller, MSYS2).
+- **macOS:** ✅ self-contained `.app`/`.dmg` (PyInstaller). The visualizer still
+  needs a loopback device (e.g. BlackHole) since macOS has no output monitor.
+- **Linux:** ✅ Flatpak bundle on the releases page; Flathub submission in review.
