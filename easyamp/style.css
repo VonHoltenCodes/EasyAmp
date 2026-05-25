@@ -160,13 +160,13 @@ window.easyamp {
 
 /* position / seek bar inside the LCD (scrubs presets) */
 .eaa-seek {
-  min-height: 12px;
   padding: 0;
-  margin-top: 2px;
+  margin-top: 3px;
+  min-height: 16px;
 }
 
 .eaa-seek trough {
-  min-height: 4px;
+  min-height: 5px;
   background-color: #052b05;
   border: 1px solid #0a3a0a;
   border-radius: 0;
@@ -179,15 +179,15 @@ window.easyamp {
   border-radius: 0;
 }
 
+/* the grip overhangs the thin trough via negative vertical margin */
 .eaa-seek slider {
-  min-width: 8px;
-  min-height: 12px;
+  margin: -6px 0;
+  min-width: 12px;
+  min-height: 16px;
   background-image: linear-gradient(180deg, #5a5a5a 0%, #303030 100%);
-  border-top: 1px solid #6c6c6c;
-  border-left: 1px solid #6c6c6c;
-  border-right: 1px solid #0a0a0a;
-  border-bottom: 1px solid #0a0a0a;
+  border: 1px solid #0a0a0a;
   border-radius: 0;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.15);
 }
 
 .eaa-seek slider:hover {
