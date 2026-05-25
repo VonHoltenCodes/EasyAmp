@@ -27,6 +27,14 @@ class EQPanel(Gtk.Box):
         set_led(self.btn_on, True)
         self.btn_on.connect("toggled", self._on_toggle)
         ctl.append(self.btn_on)
+
+        self.btn_bass = make_button("BASS", toggle=True, led=True)
+        self.btn_bass.connect("toggled", self._on_tone)
+        ctl.append(self.btn_bass)
+        self.btn_loud = make_button("LOUD", toggle=True, led=True)
+        self.btn_loud.connect("toggled", self._on_tone)
+        ctl.append(self.btn_loud)
+
         ctl.append(Gtk.Box(hexpand=True))
         self.presets_btn = Gtk.MenuButton(label="PRESETS")
         self.presets_btn.add_css_class("eaa-button")
@@ -99,6 +107,13 @@ class EQPanel(Gtk.Box):
         self._on = btn.get_active()
         set_led(btn, self._on)
         self._push()
+
+    def _on_tone(self, _btn):
+        bass = self.btn_bass.get_active()
+        loud = self.btn_loud.get_active()
+        set_led(self.btn_bass, bass)
+        set_led(self.btn_loud, loud)
+        self.player.set_tone(bass, loud)
 
     def _on_change(self):
         self._push()

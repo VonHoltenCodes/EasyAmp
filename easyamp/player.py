@@ -36,12 +36,19 @@ class Player:
         # build the EQ filter bin: audioconvert -> equalizer-10bands
         self.eq = Gst.ElementFactory.make("equalizer-10bands", "eq")
         conv = Gst.ElementFactory.make("audioconvert", "eqconv")
+        # shelving stage for the Bass / Loudness tone toggles (low + high)
+        self.tone = Gst.ElementFactory.make("equalizer-3bands", "tone")
         eqbin = Gst.Bin.new("eqbin")
         eqbin.add(conv)
         eqbin.add(self.eq)
         conv.link(self.eq)
+        last = self.eq
+        if self.tone is not None:
+            eqbin.add(self.tone)
+            self.eq.link(self.tone)
+            last = self.tone
         eqbin.add_pad(Gst.GhostPad.new("sink", conv.get_static_pad("sink")))
-        eqbin.add_pad(Gst.GhostPad.new("src", self.eq.get_static_pad("src")))
+        eqbin.add_pad(Gst.GhostPad.new("src", last.get_static_pad("src")))
         self.playbin.set_property("audio-filter", eqbin)
 
         bus = self.playbin.get_bus()
@@ -105,6 +112,17 @@ class Player:
     def set_preamp(self, gain_db: float) -> None:
         """Preamp doubles as playback volume (dB -> linear)."""
         self.playbin.set_property("volume", float(10.0 ** (gain_db / 20.0)))
+
+    def set_tone(self, bass: bool, loudness: bool) -> None:
+        """Bass enhances the low shelf; Loudness boosts low + high (a
+        loudness contour). Both are additive on the low band."""
+        if self.tone is None:
+            return
+        low = (6.0 if bass else 0.0) + (4.0 if loudness else 0.0)
+        high = 4.0 if loudness else 0.0
+        self.tone.set_property("band0", float(low))   # ~100 Hz
+        self.tone.set_property("band1", 0.0)          # ~1.1 kHz
+        self.tone.set_property("band2", float(high))  # ~10 kHz
 
     # ---- pipeline / stream info --------------------------------------
     def stream_info(self) -> dict:
