@@ -74,7 +74,7 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    console=True,           # TEMP: console attached so GTK warnings are visible
+    console=False,          # GUI app: no console window
     icon="easyamp.ico",
 )
 coll = COLLECT(

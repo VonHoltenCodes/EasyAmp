@@ -19,7 +19,7 @@ from .spectrum import SpectrumCapture  # noqa: E402
 from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
-from .widgets import window_title_bar, make_button, set_led, SeekBar, StatusIndicator  # noqa: E402
+from .widgets import window_title_bar, make_button, set_led, SeekBar, StatusIndicator, TransportIcon  # noqa: E402
 
 APP_ID = "com.vonholtencodes.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
@@ -146,11 +146,11 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         # ---- player transport ----
         xport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         xport.add_css_class("eaa-transport")
-        self.btn_open = self._xport("⏏", self.on_open)
-        self.btn_prev = self._xport("⏮", self.on_prev)
-        self.btn_play = self._xport("⏵", self.on_playpause)
-        self.btn_stop = self._xport("⏹", self.on_stop)
-        self.btn_next = self._xport("⏭", self.on_next)
+        self.btn_open = self._xport("eject", self.on_open)
+        self.btn_prev = self._xport("prev", self.on_prev)
+        self.btn_play = self._xport("play", self.on_playpause)
+        self.btn_stop = self._xport("stop", self.on_stop)
+        self.btn_next = self._xport("next", self.on_next)
         for b in (self.btn_open, self.btn_prev, self.btn_play, self.btn_stop, self.btn_next):
             xport.append(b)
         xport.append(self._sep())
@@ -194,8 +194,10 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             widget.add_css_class(c)
         return widget
 
-    def _xport(self, glyph, cb):
-        b = Gtk.Button(label=glyph)
+    def _xport(self, kind, cb):
+        b = Gtk.Button()
+        b.icon = TransportIcon(kind)
+        b.set_child(b.icon)
         b.add_css_class("eaa-xport")
         b.connect("clicked", cb)
         return b
@@ -276,7 +278,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.player.play()
         self._playing = True
         self._set_state("PLAY")
-        self.btn_play.set_label("⏸")
+        self.btn_play.icon.set_kind("pause")
         self.marquee.set_text(os.path.splitext(os.path.basename(path))[0])
         self.playlist_panel.set_current(idx)
 
@@ -287,13 +289,13 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             return
         self.player.toggle()
         self._playing = self.player.is_playing()
-        self.btn_play.set_label("⏸" if self._playing else "⏵")
+        self.btn_play.icon.set_kind("pause" if self._playing else "play")
         self._set_state("PLAY" if self._playing else "PAUSE")
 
     def on_stop(self, _b):
         self.player.stop()
         self._playing = False
-        self.btn_play.set_label("⏵")
+        self.btn_play.icon.set_kind("play")
         self._set_state("STOP")
         self.lcd_time.set_text("00:00")
         self.seek.set_fraction(0)

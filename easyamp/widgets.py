@@ -31,6 +31,77 @@ class GoldBars(Gtk.DrawingArea):
         cr.stroke()
 
 
+class TransportIcon(Gtk.DrawingArea):
+    """A Cairo-drawn transport glyph (eject/prev/play/pause/stop/next).
+
+    Drawn rather than set as a Unicode label so it renders identically on
+    every platform — the U+23xx media symbols are missing from many fonts
+    (notably the default Windows fallbacks), which would otherwise show as
+    tofu boxes.
+    """
+
+    INK = (0.12, 0.12, 0.16)
+
+    def __init__(self, kind: str):
+        super().__init__()
+        self._kind = kind
+        self.set_content_width(14)
+        self.set_content_height(14)
+        self.set_draw_func(self._draw)
+
+    def set_kind(self, kind: str) -> None:
+        if kind != self._kind:
+            self._kind = kind
+            self.queue_draw()
+
+    def _draw(self, _a, cr, w, h):
+        cr.set_source_rgb(*self.INK)
+        k = self._kind
+        top, bot, mid = h * 0.28, h * 0.72, h * 0.5
+        bar = w * 0.085
+
+        def tri_right(x0, x1):
+            cr.move_to(x0, top)
+            cr.line_to(x0, bot)
+            cr.line_to(x1, mid)
+            cr.close_path()
+            cr.fill()
+
+        def tri_left(x0, x1):
+            cr.move_to(x0, top)
+            cr.line_to(x0, bot)
+            cr.line_to(x1, mid)
+            cr.close_path()
+            cr.fill()
+
+        if k == "play":
+            tri_right(w * 0.36, w * 0.70)
+        elif k == "pause":
+            cr.rectangle(w * 0.36, top, bar * 1.4, bot - top)
+            cr.rectangle(w * 0.55, top, bar * 1.4, bot - top)
+            cr.fill()
+        elif k == "stop":
+            s = bot - top
+            cr.rectangle(w * 0.5 - s / 2, top, s, s)
+            cr.fill()
+        elif k == "prev":
+            cr.rectangle(w * 0.28, top, bar, bot - top)   # leading bar
+            cr.fill()
+            tri_left(w * 0.66, w * 0.42)                  # left-pointing triangle
+        elif k == "next":
+            tri_right(w * 0.34, w * 0.58)                 # right-pointing triangle
+            cr.rectangle(w * 0.64 - bar, top, bar, bot - top)  # trailing bar
+            cr.fill()
+        elif k == "eject":
+            cr.move_to(w * 0.5, top)                      # up triangle
+            cr.line_to(w * 0.30, mid)
+            cr.line_to(w * 0.70, mid)
+            cr.close_path()
+            cr.fill()
+            cr.rectangle(w * 0.30, bot - h * 0.08, w * 0.40, h * 0.08)  # base bar
+            cr.fill()
+
+
 class StatusIndicator(Gtk.DrawingArea):
     """Stacked green (top) / red (bottom) square LEDs + a play triangle.
     Green lights on play, red lights on stop, triangle glows on play."""
