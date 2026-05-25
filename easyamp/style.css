@@ -103,6 +103,7 @@ window.easyamp {
 .eaa-xport,
 .eaa-button {
   background-color: #c4c4cc;
+  background-image: none;   /* override theme button gradients (e.g. Adwaita in Flatpak) */
   color: #1e1e24;
   border-top: 1px solid #ffffff;
   border-left: 1px solid #ffffff;
@@ -116,9 +117,10 @@ window.easyamp {
 }
 .eaa-xport { min-width: 30px; min-height: 26px; padding: 0; font-size: 14px; }
 .eaa-button { min-height: 24px; padding: 1px 9px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
-.eaa-xport:hover, .eaa-button:hover { background-color: #d0d0d8; }
+.eaa-xport:hover, .eaa-button:hover { background-color: #d0d0d8; background-image: none; }
 .eaa-xport:active, .eaa-button:active, .eaa-button:checked {
   background-color: #aeaeb6;
+  background-image: none;
   border-top: 1px solid #2c2c32; border-left: 1px solid #2c2c32;
   border-right: 1px solid #ffffff; border-bottom: 1px solid #ffffff;
   box-shadow: inset 1px 1px 0 #8a8a92;
