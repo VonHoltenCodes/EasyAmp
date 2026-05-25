@@ -1,0 +1,2 @@
+[gui_scripts]
+easyamp = easyamp.app:main

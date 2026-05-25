@@ -1,0 +1,4 @@
+[Application]
+name=codes.vonholten.EasyAmp
+runtime=org.gnome.Platform/x86_64/48
+sdk=org.gnome.Sdk/x86_64/48

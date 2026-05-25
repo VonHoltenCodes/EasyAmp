@@ -1,0 +1,5 @@
+[Runtime]
+name=codes.vonholten.EasyAmp.Debug
+
+[ExtensionOf]
+ref=app/codes.vonholten.EasyAmp/x86_64/master

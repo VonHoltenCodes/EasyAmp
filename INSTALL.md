@@ -94,8 +94,31 @@ From a clone, with the system prerequisites present:
 ./run.sh          # or: python3 -m easyamp
 ```
 
+## Flatpak (Linux, self-contained)
+
+A Flatpak manifest is in `packaging/`. It bundles everything (GTK4 + GStreamer
+come from the GNOME runtime; NumPy and the fonts are bundled), so no host Python
+setup is needed.
+
+```bash
+# one-time: build tooling + runtimes
+sudo apt install flatpak-builder            # or your distro's package
+flatpak install --user flathub org.gnome.Platform//48 org.gnome.Sdk//48
+
+# build + install
+cd packaging
+flatpak-builder --user --install --force-clean build-dir codes.vonholten.EasyAmp.yaml
+
+# run
+flatpak run codes.vonholten.EasyAmp
+```
+
+Audio (playback + the visualizer's monitor capture) goes through the
+`--socket=pulseaudio` permission; files open via the file-chooser portal
+(plus read-only `~/Music`).
+
 ## Roadmap for packaging
 
-- **Linux:** a Flatpak manifest for one-click install (bundles GTK4 + GStreamer).
+- **Linux:** publish the Flatpak to Flathub.
 - **macOS:** a self-contained `.app`/`.dmg` via Briefcase, plus a native
   CoreAudio capture backend for the visualizer.

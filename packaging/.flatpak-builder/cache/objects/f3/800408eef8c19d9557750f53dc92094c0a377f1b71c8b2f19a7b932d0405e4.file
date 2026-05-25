@@ -1,0 +1,19 @@
+[Application]
+name=codes.vonholten.EasyAmp
+runtime=org.gnome.Platform/x86_64/48
+sdk=org.gnome.Sdk/x86_64/48
+command=easyamp
+
+[Context]
+shared=ipc;
+sockets=x11;wayland;pulseaudio;fallback-x11;
+devices=dri;
+filesystems=xdg-download:ro;xdg-music:ro;
+
+[Extension codes.vonholten.EasyAmp.Debug]
+directory=lib/debug
+autodelete=true
+no-autodownload=true
+
+[Build]
+built-extensions=codes.vonholten.EasyAmp.Debug;
