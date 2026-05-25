@@ -13,3 +13,6 @@ packaging/**/.flatpak-builder/
 builddir/
 repo/
 .flatpak/
+
+# local-only submission notes (not for the repo)
+packaging/README-flathub.md
