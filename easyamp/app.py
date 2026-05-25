@@ -6,6 +6,8 @@ from __future__ import annotations
 import math
 import os
 
+import cairo
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -479,48 +481,97 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
         cr.close_path()
 
+    # real VU dB scale: (label dB, position fraction along the arc)
+    _VU_SCALE = [(-20, 0.0), (-10, 0.22), (-7, 0.36), (-5, 0.48),
+                 (-3, 0.62), (0, 0.80), (3, 1.0)]
+    _VU_REDFRAC = 0.80  # 0 dB and above = red zone
+
     def _vu_gauge(self, cr, x, y, w, h, value, label):
-        cr.set_source_rgb(0.92, 0.89, 0.76)
-        self._rrect(cr, x, y, w, h, 4)
-        cr.fill()
+        value = max(0.0, min(1.0, value))
         cx = x + w / 2
         base_y = y + h * 0.90
-        r = min(w * 0.40, h * 0.74)
+        r = min(w * 0.43, h * 0.82)
 
         def pt(frac, rad):
             a = math.radians(135 - frac * 90)
             return cx + rad * math.cos(a), base_y - rad * math.sin(a)
 
+        # face: dark, with an atomic-green glow from the pivot that
+        # dissipates outward but never fades to full black
+        self._rrect(cr, x, y, w, h, 4)
+        cr.set_source_rgb(0.02, 0.06, 0.035)
+        cr.fill()
+        self._rrect(cr, x, y, w, h, 4)
+        cr.clip()
+        glow = cairo.RadialGradient(cx, base_y, 2, cx, base_y, r * 1.28)
+        glow.add_color_stop_rgb(0.0, 0.10, 0.46, 0.22)
+        glow.add_color_stop_rgb(0.55, 0.05, 0.22, 0.11)
+        glow.add_color_stop_rgb(1.0, 0.03, 0.13, 0.07)
+        cr.set_source(glow)
+        cr.paint()
+        cr.reset_clip()
+
+        # ticks + dB numbers
+        cr.select_font_face("monospace")
+        for db, frac in self._VU_SCALE:
+            major = db in (-20, -10, -5, 0, 3)
+            red = frac >= self._VU_REDFRAC
+            cr.set_source_rgb(*(0.97, 0.27, 0.18) if red else (0.34, 1.0, 0.62))
+            cr.set_line_width(1.4 if major else 1.0)
+            cr.move_to(*pt(frac, r - (6 if major else 4)))
+            cr.line_to(*pt(frac, r))
+            cr.stroke()
+            if major:
+                cr.set_font_size(7)
+                txt = f"+{db}" if db > 0 else str(db)
+                ext = cr.text_extents(txt)
+                lx, ly = pt(frac, r - 13)
+                cr.move_to(lx - ext.width / 2, ly + 3)
+                cr.show_text(txt)
+
+        # arc: green up to 0 dB, red beyond
         cr.set_line_width(2)
-        cr.set_source_rgb(0.10, 0.10, 0.10)
+        cr.set_source_rgb(0.18, 0.95, 0.50)
         cr.move_to(*pt(0.0, r))
         for i in range(1, 41):
-            cr.line_to(*pt(i / 40, r))
+            cr.line_to(*pt(i / 40 * self._VU_REDFRAC, r))
         cr.stroke()
-        cr.set_line_width(3)
-        cr.set_source_rgb(0.82, 0.12, 0.10)
-        cr.move_to(*pt(0.8, r))
-        for i in range(1, 21):
-            cr.line_to(*pt(0.8 + 0.2 * i / 20, r))
+        cr.set_source_rgb(0.95, 0.22, 0.16)
+        cr.move_to(*pt(self._VU_REDFRAC, r))
+        for i in range(1, 13):
+            cr.line_to(*pt(self._VU_REDFRAC + (1 - self._VU_REDFRAC) * i / 12, r))
         cr.stroke()
-        cr.set_line_width(1.5)
-        cr.set_source_rgb(0.10, 0.10, 0.10)
-        for t in range(11):
-            cr.move_to(*pt(t / 10, r - 5))
-            cr.line_to(*pt(t / 10, r))
-            cr.stroke()
-        nx, ny = pt(max(0.0, min(1.0, value)), r)
-        cr.set_line_width(2.5)
-        cr.set_source_rgb(0.05, 0.05, 0.05)
+
+        # needle: subtle glow underlay + bright tapered needle + hub
+        tipx, tipy = pt(value, r - 3)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.set_source_rgba(0.20, 1.0, 0.55, 0.22)
+        cr.set_line_width(5)
         cr.move_to(cx, base_y)
-        cr.line_to(nx, ny)
+        cr.line_to(tipx, tipy)
         cr.stroke()
-        cr.arc(cx, base_y, 3, 0, 2 * math.pi)
+        cr.set_source_rgb(0.68, 1.0, 0.82)
+        cr.set_line_width(1.8)
+        cr.move_to(cx, base_y)
+        cr.line_to(tipx, tipy)
+        cr.stroke()
+        cr.set_line_cap(cairo.LINE_CAP_BUTT)
+        cr.set_source_rgb(0.16, 0.92, 0.46)
+        cr.arc(cx, base_y, 4, 0, 6.2832)
         cr.fill()
-        cr.select_font_face("monospace")
+        cr.set_source_rgb(0.82, 1.0, 0.90)
+        cr.arc(cx, base_y, 1.6, 0, 6.2832)
+        cr.fill()
+
+        # corner labels
+        cr.set_source_rgb(0.34, 0.98, 0.58)
         cr.set_font_size(11)
-        cr.move_to(x + 6, y + h - 6)
+        cr.move_to(x + 6, y + h - 5)
         cr.show_text(label)
+        cr.set_font_size(7)
+        vu = cr.text_extents("VU")
+        cr.move_to(x + w - vu.width - 6, y + h - 5)
+        cr.show_text("VU")
 
     # ---- EasyEffects system controls ---------------------------------
     def refresh_ee(self):
