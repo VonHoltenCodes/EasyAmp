@@ -1,38 +1,52 @@
-"""Live audio capture for the visualizer.
+"""Live audio capture for the visualizer, via GStreamer.
 
-Captures the current default sink's monitor with `parec` (PipeWire's
-PulseAudio-compatible recorder) in stereo, then per frame computes:
+Captures a sink **monitor** source (the system output) through a
+``pulsesrc -> appsink`` pipeline, then per FFT frame computes:
 
-  * a log-spaced FFT spectrum (mono downmix) for the bar display, and
-  * per-channel RMS levels (L/R) for the analog VU meters,
+  * a log-spaced FFT spectrum (mono downmix) for the bar display,
+  * per-channel RMS levels (L/R) for the VU meters, and
+  * a decimated time-domain waveform for the mini scope.
 
-reporting both to a callback marshalled onto the GTK main loop. Fully
-decoupled from EasyEffects: it visualises the system output (post-effects).
+Using GStreamer (rather than shelling out to ``parec``) means this works
+both natively and inside the Flatpak sandbox, where the GNOME runtime
+provides the pulse/pipewire GStreamer plugins. The monitor device is found
+with ``GstDeviceMonitor`` so no host ``pactl`` is required.
 """
 
 from __future__ import annotations
 
-import subprocess
-import threading
+import gi
 
-import numpy as np
-from gi.repository import GLib
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst, GLib  # noqa: E402
+import numpy as np  # noqa: E402
+
+Gst.init(None)
 
 RATE = 48000
 FFT = 2048
 EPS = 1e-9
 
 
-def _default_monitor() -> str:
+def _find_monitor_device():
+    """Return a GstDevice for a sink-monitor audio source, or None."""
+    dm = Gst.DeviceMonitor.new()
+    dm.add_filter("Audio/Source", None)
+    dm.start()
+    chosen = None
     try:
-        sink = subprocess.run(
-            ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=4
-        ).stdout.strip()
-        if sink:
-            return f"{sink}.monitor"
-    except (subprocess.SubprocessError, OSError):
-        pass
-    return "@DEFAULT_MONITOR@"
+        for dev in dm.get_devices() or []:
+            props = dev.get_properties()
+            name = cls = ""
+            if props:
+                name = props.get_string("node.name") or props.get_string("device.name") or ""
+                cls = props.get_string("device.class") or ""
+            if cls == "monitor" or name.endswith(".monitor"):
+                chosen = dev
+                break
+    finally:
+        dm.stop()
+    return chosen
 
 
 class SpectrumCapture:
@@ -41,10 +55,12 @@ class SpectrumCapture:
         self.on_data = on_data
         self.levels = np.zeros(bands, dtype=np.float32)
         self.vu = (0.0, 0.0)
-        self._proc: subprocess.Popen | None = None
-        self._thread: threading.Thread | None = None
-        self._stop = threading.Event()
+        self._pipeline = None
+        self._buf = np.empty(0, dtype=np.float32)   # interleaved stereo
         self._window = np.hanning(FFT).astype(np.float32)
+        self._smoothed = np.zeros(bands, dtype=np.float32)
+        self._vu_l = 0.0
+        self._vu_r = 0.0
 
         freqs = np.fft.rfftfreq(FFT, 1.0 / RATE)
         edges = np.logspace(np.log10(40.0), np.log10(RATE / 2), bands + 1)
@@ -54,71 +70,82 @@ class SpectrumCapture:
         ]
 
     def start(self) -> None:
-        if self._proc is not None:
+        if self._pipeline is not None:
             return
-        self._stop.clear()
+        dev = _find_monitor_device()
+        src = dev.create_element(None) if dev else Gst.ElementFactory.make("pulsesrc", None)
+        if src is None:
+            return
+        conv = Gst.ElementFactory.make("audioconvert", None)
+        capsf = Gst.ElementFactory.make("capsfilter", None)
+        capsf.set_property("caps", Gst.Caps.from_string(
+            f"audio/x-raw,format=F32LE,channels=2,rate={RATE},layout=interleaved"))
+        sink = Gst.ElementFactory.make("appsink", "sink")
+        sink.set_property("emit-signals", True)
+        sink.set_property("max-buffers", 6)
+        sink.set_property("drop", True)
+        sink.set_property("sync", False)
+        sink.connect("new-sample", self._on_sample)
+
+        pipeline = Gst.Pipeline.new("easyamp-capture")
+        for el in (src, conv, capsf, sink):
+            pipeline.add(el)
+        if not (src.link(conv) and conv.link(capsf) and capsf.link(sink)):
+            return
+        self._pipeline = pipeline
+        pipeline.set_state(Gst.State.PLAYING)
+
+    def _on_sample(self, sink):
+        sample = sink.emit("pull-sample")
+        if sample is None:
+            return Gst.FlowReturn.OK
+        buf = sample.get_buffer()
+        ok, mapinfo = buf.map(Gst.MapFlags.READ)
+        if not ok:
+            return Gst.FlowReturn.OK
         try:
-            self._proc = subprocess.Popen(
-                ["parec", "--format=float32le", f"--rate={RATE}",
-                 "--channels=2", "--raw", f"--device={_default_monitor()}",
-                 "--latency-msec=40"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
-            )
-        except OSError:
-            self._proc = None
-            return
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+            chunk = np.frombuffer(mapinfo.data, dtype=np.float32).copy()
+        finally:
+            buf.unmap(mapinfo)
+        self._buf = np.concatenate((self._buf, chunk))
+        need = FFT * 2  # stereo interleaved
+        while len(self._buf) >= need:
+            frame = self._buf[:need]
+            self._buf = self._buf[need:]
+            self._process(frame)
+        return Gst.FlowReturn.OK
 
-    def _run(self) -> None:
-        need = FFT * 2 * 4  # stereo float32
-        buf = bytearray()
-        smoothed = np.zeros(self.bands, dtype=np.float32)
-        vu_l = vu_r = 0.0
-        while not self._stop.is_set() and self._proc and self._proc.stdout:
-            chunk = self._proc.stdout.read(need - len(buf))
-            if not chunk:
-                break
-            buf += chunk
-            if len(buf) < need:
-                continue
-            stereo = np.frombuffer(bytes(buf), dtype=np.float32).reshape(-1, 2)
-            buf.clear()
-            left, right = stereo[:, 0], stereo[:, 1]
-            mono = (left + right) * 0.5
+    def _process(self, frame) -> None:
+        stereo = frame.reshape(-1, 2)
+        left, right = stereo[:, 0], stereo[:, 1]
+        mono = (left + right) * 0.5
 
-            # ---- spectrum (mono) ----
-            mag = np.abs(np.fft.rfft(mono * self._window)) / (FFT / 2)
-            out = np.empty(self.bands, dtype=np.float32)
-            for i, b in enumerate(self._bins):
-                band = mag[b].mean() if len(b) else 0.0
-                db = 20.0 * np.log10(band + EPS)
-                out[i] = float(np.clip((db + 60.0) / 60.0, 0.0, 1.0))
-            smoothed = np.maximum(out, smoothed * 0.80)  # fast attack, slow decay
-            self.levels = smoothed
+        mag = np.abs(np.fft.rfft(mono * self._window)) / (FFT / 2)
+        out = np.empty(self.bands, dtype=np.float32)
+        for i, b in enumerate(self._bins):
+            band = mag[b].mean() if len(b) else 0.0
+            db = 20.0 * np.log10(band + EPS)
+            out[i] = float(np.clip((db + 60.0) / 60.0, 0.0, 1.0))
+        self._smoothed = np.maximum(out, self._smoothed * 0.80)
+        self.levels = self._smoothed
 
-            # ---- VU (per channel RMS, ~averaging ballistics) ----
-            def lvl(ch):
-                rms = float(np.sqrt(np.mean(ch * ch)))
-                db = 20.0 * np.log10(rms + EPS)
-                return float(np.clip((db + 50.0) / 50.0, 0.0, 1.0))
+        def lvl(ch):
+            rms = float(np.sqrt(np.mean(ch * ch)))
+            db = 20.0 * np.log10(rms + EPS)
+            return float(np.clip((db + 50.0) / 50.0, 0.0, 1.0))
 
-            vu_l = vu_l * 0.7 + lvl(left) * 0.3
-            vu_r = vu_r * 0.7 + lvl(right) * 0.3
-            self.vu = (vu_l, vu_r)
+        self._vu_l = self._vu_l * 0.7 + lvl(left) * 0.3
+        self._vu_r = self._vu_r * 0.7 + lvl(right) * 0.3
+        self.vu = (self._vu_l, self._vu_r)
 
-            # decimated time-domain waveform for the mini scope
-            step = max(1, FFT // 64)
-            wave = mono[::step][:64].astype(np.float32).copy()
+        step = max(1, FFT // 64)
+        wave = mono[::step][:64].astype(np.float32).copy()
 
-            if self.on_data:
-                GLib.idle_add(self.on_data, smoothed.copy(), (vu_l, vu_r), wave)
+        if self.on_data:
+            GLib.idle_add(self.on_data, self._smoothed.copy(), (self._vu_l, self._vu_r), wave)
 
     def stop(self) -> None:
-        self._stop.set()
-        if self._proc is not None:
-            try:
-                self._proc.terminate()
-            except OSError:
-                pass
-            self._proc = None
+        if self._pipeline is not None:
+            self._pipeline.set_state(Gst.State.NULL)
+            self._pipeline = None
+        self._buf = np.empty(0, dtype=np.float32)
