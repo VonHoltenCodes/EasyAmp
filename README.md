@@ -1,37 +1,32 @@
 # EasyAmp
 
-A classic-player-style **shell for [EasyEffects](https://github.com/wwmm/easyeffects)** — a loving tribute to the late-90s desktop audio player, built as a retro remote control for your system EQ.
+A **classic-player-style media player with a 10-band EQ** for Linux — a loving tribute to the late-90s desktop audio player, built fresh in GTK4 with original artwork.
 
-EasyAmp does **not** fork or modify EasyEffects. It's a small, standalone GTK4 app that drives a normally-installed EasyEffects from the outside, wrapping it in beveled gunmetal chrome and a green 7-segment LCD.
+EasyAmp plays your local music through its own GStreamer pipeline (with a built-in graphic EQ), shows a live spectrum or analog VU meters, **and** doubles as a retro front-end for [EasyEffects](https://github.com/wwmm/easyeffects) system-wide processing. Because it owns its own window, the chrome is pixel-styled to evoke the era.
 
 > Original artwork and an original name. EasyAmp uses **no** trademarked names, logos, or skin bitmaps from any media player. It's a tribute to an era, not a clone of a product.
 
-## Status
+![EasyAmp — spectrum view](assets/easyamp-spectrum.png)
 
-**v0.1 — alpha.** Working today:
+![EasyAmp — VU meter view](assets/easyamp-vu.png)
 
-- Reads and lists your EasyEffects output presets
-- Loads a preset from a dropdown
-- Global bypass toggle with a power LED
-- LCD readout of the active preset
-- Retro skin (gunmetal bevels + DSEG7 green LCD + Pixelify pixel font)
+## Features
 
-Planned (see `ARCHITECTURE.md`):
-
-- Live spectrum/oscilloscope visualizer (its own PipeWire capture + FFT)
-- **Analog VU meters** as a switchable alternative to digital bar meters
-- Input-preset support and per-category state
-- Optional compact/"shade" mode
-
-## Why a shell instead of a fork?
-
-EasyEffects is GTK4/libadwaita and follows the GNOME HIG closely; a true WinAmp-style *layout* would require forking its C++/Blueprint UI and maintaining a heavy downstream fork that upstream wouldn't merge. Instead, EasyAmp leans on the control surface EasyEffects **already exposes** — its CLI (forwarded over D-Bus to the running instance) and its GSettings — so EasyEffects does all the DSP while EasyAmp is just a retro face. Lightweight, no fork to maintain, and it can be pixel-perfect because it owns its own window.
+- **Media player** — open files/playlists (anything GStreamer decodes: MP3, FLAC, WAV, OGG, Opus, M4A…), transport controls, seek, track metadata, `.m3u` load/save.
+- **Built-in 10-band graphic EQ** — preamp + 10 bands with a live response curve, value-colored sliders, bypass, and **portable JSON presets** (auto-loads an `EASYAMP DEFAULT` preset if you save one).
+- **Visualizer** — switch between a live **green spectrum analyzer** (PipeWire capture + FFT) and dual **analog VU meters** (atomic-green, real dB scale, glowing needle).
+- **Mini scope** — a small mirrored bar-graph waveform under the timer.
+- **System EQ control** — drives a running EasyEffects instance (preset select + global bypass) for system-wide audio, so it still visualizes/controls anything playing (browser, streaming apps, etc.).
+- **Docked single-window UI** — player + EQ + playlist snap together with EQ/PL toggles, in a beveled gunmetal skin with green LCD readouts.
 
 ## Requirements
 
-- EasyEffects (Flatpak `com.github.wwmm.easyeffects`, or a native install)
-- Python 3 + PyGObject with GTK 4 (`gir1.2-gtk-4.0`)
-- Fonts (bundled-by-reference, OFL): **DSEG7 Classic** and **Pixelify Sans** in `~/.local/share/fonts`
+- Python 3 + PyGObject with **GTK 4** (`gir1.2-gtk-4.0`)
+- **GStreamer 1.x** with the base/good plugins (playback, `equalizer-10bands`)
+- **numpy** (spectrum FFT)
+- **PipeWire** with `parec` (PulseAudio compat) for the visualizer capture
+- **EasyEffects** (optional) — for the system-EQ controls
+- Fonts (OFL, optional but recommended) in `~/.local/share/fonts`: **DSEG7 Classic** and **Pixelify Sans**
 
 ## Run
 
@@ -41,6 +36,29 @@ EasyEffects is GTK4/libadwaita and follows the GNOME HIG closely; a true WinAmp-
 python3 -m easyamp
 ```
 
+## Architecture
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and the EasyEffects control surface. In short: a GStreamer `playbin` (with `equalizer-10bands` as its `audio-filter`) handles playback; the spectrum/VU come from an independent `parec` capture so they reflect *all* system audio; EasyEffects is driven via its CLI/D-Bus/GSettings.
+
+## Authors
+
+- **Created and authored by [VonHoltenCodes](https://github.com/VonHoltenCodes)** (Trenton Von Holten) — main author & creator.
+- **Co-authored with Claude** (Anthropic's Claude Code).
+
+## Credits & acknowledgements
+
+EasyAmp stands on a lot of open-source work — thank you to:
+
+- **[EasyEffects](https://github.com/wwmm/easyeffects)** by Wellington Wallace (wwmm) — the system-wide audio effects engine EasyAmp front-ends.
+- **[EasyEffects-Presets](https://github.com/JackHack96/EasyEffects-Presets)** by JackHack96 — the EasyEffects preset collection used for system-EQ presets.
+- **[GStreamer](https://gstreamer.freedesktop.org/)** — playback pipeline and the `equalizer-10bands` graphic EQ.
+- **[PipeWire](https://pipewire.org/)** — audio capture for the visualizer.
+- **[GTK 4](https://www.gtk.org/) / [PyGObject](https://pygobject.gnome.org/)** — the UI toolkit.
+- **[DSEG](https://github.com/keshikan/DSEG)** 7-segment font by keshikan (SIL OFL).
+- **[Pixelify Sans](https://fonts.google.com/specimen/Pixelify+Sans)** by Stefie Justprince (SIL OFL).
+
+If you maintain something EasyAmp uses and want different/expanded credit, please open an issue.
+
 ## License
 
-MIT (see `LICENSE`). EasyAmp only invokes EasyEffects externally and includes none of its code.
+[MIT](LICENSE). EasyAmp is completely open source. Bundled fonts are under the SIL Open Font License; EasyEffects and its presets are the property of their respective authors and are used/credited per their own licenses.

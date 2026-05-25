@@ -1,0 +1,15 @@
+EasyAmp authors
+===============
+
+Main author & creator:
+  VonHoltenCodes (Trenton Von Holten)  <https://github.com/VonHoltenCodes>
+
+Co-author:
+  Claude (Anthropic's Claude Code)
+
+Third-party work EasyAmp builds on or credits (see README "Credits"):
+  - EasyEffects                — Wellington Wallace (wwmm)
+  - EasyEffects-Presets        — JackHack96
+  - GStreamer, PipeWire, GTK 4 / PyGObject
+  - DSEG 7-segment font        — keshikan (SIL OFL)
+  - Pixelify Sans font         — Stefie Justprince (SIL OFL)
