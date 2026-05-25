@@ -20,9 +20,7 @@ the font files and are installed alongside them.
 
 | Component | License | Notes |
 |-----------|---------|-------|
-| **EasyEffects** (Wellington Wallace / wwmm) | GPL-3.0 | EasyAmp controls a separately-installed EasyEffects via its CLI / D-Bus / GSettings. **None of its code is included or linked**, so the GPL does not extend to EasyAmp. Credited in the README. |
-| **EasyEffects-Presets** (JackHack96) | per that project | EasyAmp does **not** redistribute these presets; they are installed by the user into EasyEffects. EasyAmp's own built-in EQ presets are original. Credited in the README. |
-| **GStreamer** | LGPL-2.1+ (plus per-plugin licenses) | System library; provides playback and the `equalizer-10bands` / capture pipeline. Not redistributed by EasyAmp. |
+| **GStreamer** | LGPL-2.1+ (plus per-plugin licenses) | System library; provides playback, the `equalizer-10bands` EQ, and the capture pipeline. Not redistributed by EasyAmp. |
 | **GTK 4 / PyGObject** | LGPL-2.1+ | System libraries; the UI toolkit. Not redistributed by EasyAmp. |
 | **PipeWire** | MIT | System audio server used for capture. Not redistributed. |
 | **NumPy** | BSD-3-Clause | Pure-Python dependency, installed via pip (not vendored). |

@@ -1,82 +1,67 @@
 # EasyAmp architecture
 
-EasyAmp is a **companion shell**: a standalone GTK4 application that remote-controls
-an unmodified EasyEffects instance. This document records the design and the
-EasyEffects control surface it relies on.
+EasyAmp is a self-contained GTK4 media player: it decodes and plays audio
+itself, applies its own graphic EQ, and renders its own visualizers. It has no
+external service dependencies.
 
 ## Components
 
 ```
 easyamp/
-├── backend.py   # EasyEffects control: CLI + D-Bus + GSettings wrappers
-├── app.py       # GTK4 Application + the player window, wired to backend
-├── style.css    # the retro skin (gunmetal chrome + green LCD)
-└── __main__.py  # entry point (python -m easyamp)
+├── app.py          # GTK4 Application + the docked window (player/EQ/playlist)
+├── player.py       # GStreamer playbin + the built-in EQ chain
+├── spectrum.py     # GStreamer capture (pulsesrc -> appsink) + numpy analysis
+├── eqpanel.py      # EQ panel: header, ON/PRESETS/tone toggles
+├── eqwidget.py     # custom-drawn interactive 10-band EQ
+├── eqpresets.py    # portable JSON EQ presets (built-ins + user)
+├── playlistpanel.py# playlist (track list + ADD/REM/LOAD/SAVE)
+├── widgets.py      # shared custom widgets (title bars, LED buttons, seek bar)
+├── fontload.py     # installs bundled fonts on first run
+├── style.css       # the skin
+└── fonts/          # bundled DSEG7 + Pixelify Sans (SIL OFL)
 ```
 
-- **backend.py** has no GTK dependency and is independently testable.
-- **app.py** is pure presentation + event wiring; all state changes go through `backend`.
-- **style.css** is loaded at `STYLE_PROVIDER_PRIORITY_APPLICATION`; because EasyAmp owns
-  its window (it is *not* a Flatpak and uses *no* libadwaita), CSS applies with no
-  sandbox/theme-shadowing issues.
+## Playback + EQ
 
-## EasyEffects control surface (verified on v7.2.5)
+`player.py` builds a GStreamer `playbin` and inserts an EQ **bin** as its
+`audio-filter`:
 
-### CLI (forwarded to the running instance via GApplication/D-Bus)
-| Need                | Command                        | Notes |
-|---------------------|--------------------------------|-------|
-| List presets        | `easyeffects -p`               | "Output Presets: a,b,…" / "Input Presets: …" |
-| Load preset         | `easyeffects -l <name>`        | |
-| Active preset       | `easyeffects -s output\|input` | |
-| Global bypass set   | `easyeffects -b 1` / `-b 2`    | 1 = enable bypass, 2 = disable |
-| Global bypass query | `easyeffects -b 3`             | prints `0`/`1` |
-| Quit / reset        | `easyeffects -q` / `-r`        | |
+```
+playbin → (audio-filter) → audioconvert → equalizer-10bands → [tone shelf] → out
+```
 
-On this machine the binary is the Flatpak, invoked as
-`flatpak run --command=easyeffects com.github.wwmm.easyeffects …`. `backend._ee_cmd()`
-prefers a native `easyeffects` on PATH and falls back to the Flatpak.
+- `equalizer-10bands` is the 10-band graphic EQ driven by `eqwidget.py`.
+- A second shelving stage provides the **Bass** and **Loudness** tone toggles.
+- Output goes to the default sink, so it's also picked up by the visualizer
+  capture like any other audio source.
 
-### D-Bus
-EasyEffects registers `com.github.wwmm.easyeffects` on the session bus and exposes the
-standard GApplication interfaces — notably `org.gtk.Actions` (`Activate`/`SetState`) and
-`org.freedesktop.Application.ActivateAction`. Useful for triggering app actions without
-spawning a process; the CLI is simpler for presets/bypass and is what v0.1 uses.
+`playbin` decodes anything GStreamer can read (MP3/FLAC/WAV/OGG/Opus/M4A…) and
+provides position/duration, track tags, and stream info (rate/channels/bitrate).
 
-### GSettings
-Five schemas: `com.github.wwmm.easyeffects`, `.spectrum`, `.libportal`,
-`.streaminputs`, `.streamoutputs`. Read inside the Flatpak sandbox via
-`flatpak run --command=sh … -c 'gsettings …'`. The spectrum trace color lives at
-`…spectrum color` (RGBA floats) — EasyAmp reads it so its own visualizer can match.
+## Visualizer capture
 
-## Spectrum visualizer (planned)
+`spectrum.py` captures the system output independently of playback, so the
+spectrum/VU/scope reflect **all** audio on the machine:
 
-EasyEffects' spectrum is drawn internally and **not** exposed as data, and its panel
-background is hardcoded black (not stylable). So EasyAmp will render its **own** classic
-green spectrum by capturing audio independently:
+```
+pulsesrc (sink monitor) → audioconvert → caps(F32LE,2ch,48k) → appsink
+```
 
-1. Tap a PipeWire monitor source (e.g. via `pw-cat`/`pipewire` Python bindings or a
-   GStreamer `pipewiresrc → spectrum` element).
-2. Run an FFT (numpy is already on the system) and draw bars/oscilloscope on the
-   `.eaa-viz` `Gtk.DrawingArea` with a Cairo snapshot at ~30–60 fps.
-3. Match the bar color to EasyEffects' configured spectrum color for consistency.
+- The monitor source is found with `GstDeviceMonitor` (no host `pactl`/`parec`),
+  which also makes it work inside the Flatpak sandbox.
+- Each FFT frame yields: log-spaced spectrum bands, per-channel RMS (VU), and a
+  decimated waveform (mini scope) — all computed with numpy and marshalled to
+  the GTK main loop via `GLib.idle_add`.
 
-This is intentionally decoupled from EasyEffects and is the next milestone after the
-control UI is solid.
+## UI
 
-## Meters: digital vs. analog VU (planned)
-
-The level meters fed by the same capture pipeline will be switchable between two looks:
-
-- **Digital** — segmented LED bar meters (green→amber→red), the default.
-- **Analog VU** — a custom Cairo-drawn needle gauge with the classic cream/black VU face,
-  ballistics approximating the 300 ms VU integration time and a red overload zone.
-
-Both consume the same RMS/peak values from the capture thread; only the
-`Gtk.DrawingArea` renderer differs. A toggle in the UI (and a persisted setting) selects
-the active meter style.
+A single resizable window (`app.py`) docks three panels — player + EQ on the
+left, playlist on the right — toggled by the EQ/PL buttons (so they "snap"
+together without needing window positioning, which Wayland disallows). The
+chrome, meters, EQ, and seek bar are custom Cairo drawings; the rest is CSS over
+standard GTK widgets. CSS loads at `STYLE_PROVIDER_PRIORITY_APPLICATION`.
 
 ## Non-goals
 
-- Forking or patching EasyEffects.
-- Reimplementing DSP/EQ (EasyEffects owns all audio processing).
-- Shipping any trademarked media-player assets.
+- No external audio daemon control; EasyAmp processes only its own playback.
+- No reimplementation of a system-wide effects engine.
