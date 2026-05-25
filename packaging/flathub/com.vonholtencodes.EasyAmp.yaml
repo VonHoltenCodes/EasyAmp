@@ -62,5 +62,5 @@ modules:
     sources:
       - type: git
         url: https://github.com/VonHoltenCodes/EasyAmp.git
-        tag: v0.3.0
-        commit: e93800987d16ae80095b6afbf280690722ceff49
+        tag: v0.3.1
+        commit: 237a52abc1e09e7b8272f0235639e5d134034712
