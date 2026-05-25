@@ -1,0 +1,44 @@
+name: Flatpak
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to upload the bundle to a release on tags
+
+jobs:
+  build:
+    name: Build Flatpak bundle
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: EasyAmp.flatpak
+          manifest-path: packaging/codes.vonholten.EasyAmp.yaml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      # Always keep the bundle as a build artifact (handy for PRs / manual runs)
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyAmp-flatpak
+          path: EasyAmp.flatpak
+
+      # On a version tag, attach the bundle to the GitHub Release
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EasyAmp.flatpak
