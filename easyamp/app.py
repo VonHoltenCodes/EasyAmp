@@ -87,16 +87,16 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         handle.set_child(bar)
         self.set_titlebar(handle)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
         outer.add_css_class("eaa-chassis")
         self.set_child(outer)
 
-        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         left.set_size_request(300, -1)
         outer.append(left)
 
         # ---- display ----
-        info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         info.add_css_class("eaa-display")
         self.lcd_time = self._mk(Gtk.Label(label="00:00"), "eaa-bignum")
         self.lcd_time.set_valign(Gtk.Align.CENTER)

@@ -1,224 +1,237 @@
 /* ============================================
    EasyAmp — classic-player tribute skin
-   WinAmp-"Base"-inspired palette. Original art;
+   Dark, dense, hard-beveled, metallic. Original art;
    no trademarked names, logos, or bitmaps.
    ============================================ */
 
 window.easyamp {
-  background-color: #2f2f39;
-  color: #c8d0e0;
+  background-color: #14141a;
+  color: #b8c0d4;
   font-family: "Pixelify Sans", "Noto Sans", sans-serif;
 }
 
-/* dark metal chassis behind everything */
+/* dark metal chassis with a fine horizontal scanline sheen */
 .eaa-chassis {
-  background-image: linear-gradient(180deg, #3a3a46 0%, #2e2e38 50%, #26262e 100%);
-  padding: 4px;
+  background-color: #16161c;
+  background-image: repeating-linear-gradient(
+    0deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px,
+    rgba(0,0,0,0.10) 2px, rgba(0,0,0,0.10) 3px);
+  padding: 3px;
 }
 
-/* ---- blue tiled title bars ---- */
+/* ===== textured blue title bars (hard top highlight) ===== */
 .eaa-titlebar,
 .eaa-panelbar {
-  background-image: linear-gradient(180deg, #5a6aa0 0%, #3a4470 48%, #2a3156 100%);
-  border-top: 1px solid #6f7fb8;
-  border-bottom: 1px solid #161a2c;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
-  padding: 3px 8px;
-  min-height: 22px;
+  background-color: #36406e;
+  background-image: repeating-linear-gradient(
+    0deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px,
+    rgba(0,0,0,0.16) 2px, rgba(0,0,0,0.16) 3px);
+  border-top: 1px solid #7d8ec0;
+  border-bottom: 1px solid #090b14;
+  padding: 2px 6px;
+  min-height: 18px;
 }
 
 .eaa-title {
-  color: #c2ccec;
+  color: #aeb8e0;
   font-weight: bold;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 3px;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(255,255,255,0.15);
 }
 
 .eaa-panelbar-label {
-  color: #aab6e0;
+  color: #9aa6d4;
   font-weight: bold;
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 2px;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(255,255,255,0.12);
 }
 
-/* ---- black LCD display ---- */
+/* ===== black LCD display ===== */
 .eaa-display {
   background-color: #000000;
   border-top: 1px solid #000000;
   border-left: 1px solid #000000;
-  border-right: 1px solid #3a3a46;
-  border-bottom: 1px solid #3a3a46;
-  box-shadow: inset 0 0 14px rgba(0,0,0,0.95);
-  padding: 8px 10px;
+  border-right: 1px solid #34343e;
+  border-bottom: 1px solid #34343e;
+  box-shadow: inset 0 0 16px rgba(0,0,0,1);
+  padding: 5px 8px;
 }
 
-/* big green 7-segment time (digits + colon) */
 .eaa-bignum {
-  color: #16e016;
+  color: #1eff1e;
   font-family: "DSEG7 Classic", monospace;
-  font-size: 40px;
-  text-shadow: 0 0 10px rgba(22,224,22,0.85);
-  padding: 0 8px;
+  font-size: 38px;
+  text-shadow: 0 0 12px rgba(30,255,30,0.9), 0 0 3px rgba(30,255,30,1);
+  padding: 0 6px;
 }
 
-/* now-playing marquee */
 .eaa-lcd {
-  color: #16e016;
+  color: #1eff1e;
   font-family: "Pixelify Sans", monospace;
-  font-size: 17px;
+  font-size: 15px;
   letter-spacing: 1px;
-  text-shadow: 0 0 7px rgba(22,224,22,0.7);
+  text-shadow: 0 0 8px rgba(30,255,30,0.8);
 }
 
-/* small dim indicators that light up */
 .eaa-ind {
-  color: #1c6a1c;
+  color: #166e16;
   font-family: "Pixelify Sans", sans-serif;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 1px;
 }
+.eaa-ind.on { color: #2bff2b; text-shadow: 0 0 6px rgba(30,255,30,0.9); }
 
-.eaa-ind.on {
-  color: #2bff2b;
-  text-shadow: 0 0 6px rgba(22,224,22,0.8);
-}
-
-/* ---- beveled metal control rows ---- */
+/* ===== metal control strips (flat + scanline + hard bevel) ===== */
 .eaa-transport,
 .eaa-panel {
-  background-image: linear-gradient(180deg, #3c3c48 0%, #2c2c36 100%);
-  border-top: 1px solid #5e5e6e;
-  border-left: 1px solid #5e5e6e;
-  border-right: 1px solid #121218;
-  border-bottom: 1px solid #121218;
-  padding: 5px 6px;
+  background-color: #24242c;
+  background-image: repeating-linear-gradient(
+    0deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px,
+    rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 3px);
+  border-top: 1px solid #50505e;
+  border-left: 1px solid #50505e;
+  border-right: 1px solid #06060a;
+  border-bottom: 1px solid #06060a;
+  padding: 3px 4px;
 }
 
-/* square beveled transport buttons */
+/* small, tight, hard-beveled transport buttons */
 .eaa-xport {
-  min-width: 40px;
-  min-height: 30px;
+  min-width: 32px;
+  min-height: 24px;
   padding: 0;
-  font-size: 15px;
-  background-image: linear-gradient(180deg, #4a4a56 0%, #30303a 100%);
-  color: #d8dce8;
-  border-top: 1px solid #66667a;
-  border-left: 1px solid #66667a;
-  border-right: 1px solid #101016;
-  border-bottom: 1px solid #101016;
-  border-radius: 1px;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
-  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.10);
+  font-size: 13px;
+  background-color: #2c2c34;
+  background-image: repeating-linear-gradient(
+    0deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px,
+    rgba(0,0,0,0.10) 2px, rgba(0,0,0,0.10) 3px);
+  color: #c4ccdc;
+  border-top: 1px solid #5e5e70;
+  border-left: 1px solid #5e5e70;
+  border-right: 1px solid #050508;
+  border-bottom: 1px solid #050508;
+  border-radius: 0;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.9);
 }
-
-.eaa-xport:hover { background-image: linear-gradient(180deg, #54545f 0%, #38383f 100%); color: #fff; }
+.eaa-xport:hover { color: #fff; }
 .eaa-xport:active {
-  background-image: linear-gradient(180deg, #242430 0%, #2c2c36 100%);
-  border-top: 1px solid #101016; border-left: 1px solid #101016;
-  border-right: 1px solid #66667a; border-bottom: 1px solid #66667a;
-  box-shadow: inset 1px 1px 3px rgba(0,0,0,0.7);
+  background-color: #1a1a20;
+  border-top: 1px solid #050508; border-left: 1px solid #050508;
+  border-right: 1px solid #5e5e70; border-bottom: 1px solid #5e5e70;
 }
-.eaa-xport.playing { color: #2bff2b; text-shadow: 0 0 8px rgba(22,224,22,0.95); }
+.eaa-xport.playing { color: #2bff2b; text-shadow: 0 0 8px rgba(30,255,30,1); }
 
-/* labeled buttons (EQ / PL / ON / PRESETS / playlist actions) */
+/* small labeled buttons (EQ / PL / ON / PRESETS / playlist) */
 .eaa-button {
-  min-height: 26px;
-  padding: 0 10px;
-  font-size: 11px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: bold;
   letter-spacing: 1px;
-  background-image: linear-gradient(180deg, #4a4a56 0%, #30303a 100%);
-  color: #d8dce8;
-  border-top: 1px solid #66667a;
-  border-left: 1px solid #66667a;
-  border-right: 1px solid #101016;
-  border-bottom: 1px solid #101016;
-  border-radius: 1px;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+  background-color: #2c2c34;
+  background-image: repeating-linear-gradient(
+    0deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px,
+    rgba(0,0,0,0.10) 2px, rgba(0,0,0,0.10) 3px);
+  color: #b6bed0;
+  border-top: 1px solid #5e5e70;
+  border-left: 1px solid #5e5e70;
+  border-right: 1px solid #050508;
+  border-bottom: 1px solid #050508;
+  border-radius: 0;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.9);
 }
 .eaa-button:hover { color: #6cff6c; }
-.eaa-button.on { color: #2bff2b; text-shadow: 0 0 6px rgba(22,224,22,0.9); }
+.eaa-button.on { color: #2bff2b; text-shadow: 0 0 6px rgba(30,255,30,0.9); background-color: #1d2a1d; }
 
-.eaa-xsep { background-color: #101018; min-width: 2px; margin: 2px 4px; box-shadow: 1px 0 0 rgba(255,255,255,0.08); }
+.eaa-xsep { background-color: #050508; min-width: 2px; margin: 1px 3px;
+  box-shadow: 1px 0 0 rgba(255,255,255,0.10); }
 
 .eaa-combo,
 .eaa-combo > button {
-  min-height: 26px;
-  background-image: linear-gradient(180deg, #3a3a46 0%, #2c2c36 100%);
-  color: #c8d0e0;
-  border-top: 1px solid #55556a;
-  border-left: 1px solid #55556a;
-  border-right: 1px solid #101016;
-  border-bottom: 1px solid #101016;
-  border-radius: 1px;
+  min-height: 22px;
+  font-size: 11px;
+  background-color: #1a1a20;
+  color: #1eff1e;
+  border-top: 1px solid #050508;
+  border-left: 1px solid #050508;
+  border-right: 1px solid #44444e;
+  border-bottom: 1px solid #44444e;
+  border-radius: 0;
+  text-shadow: 0 0 5px rgba(30,255,30,0.5);
 }
 
-/* ---- playback seek bar ---- */
-.eaa-seek { padding: 0; margin-top: 3px; min-height: 16px; }
+/* ===== playback seek bar ===== */
+.eaa-seek { padding: 0; margin-top: 2px; min-height: 14px; }
 .eaa-seek trough {
-  min-height: 5px; background-color: #052b05;
-  border: 1px solid #0a3a0a; border-radius: 0; box-shadow: inset 0 0 4px rgba(0,0,0,0.9);
+  min-height: 4px; background-color: #031a03;
+  border-top: 1px solid #000; border-left: 1px solid #000;
+  border-right: 1px solid #0a3a0a; border-bottom: 1px solid #0a3a0a; border-radius: 0;
 }
 .eaa-seek highlight {
-  background-image: linear-gradient(90deg, #15c015 0%, #2bff2b 100%);
-  box-shadow: 0 0 5px rgba(22,224,22,0.7); border-radius: 0;
+  background-color: #1eff1e;
+  box-shadow: 0 0 5px rgba(30,255,30,0.8); border-radius: 0;
 }
 .eaa-seek slider {
-  margin: -6px 0; min-width: 12px; min-height: 16px;
-  background-image: linear-gradient(180deg, #5a5a66 0%, #303038 100%);
-  border-top: 1px solid #6c6c7a; border-left: 1px solid #6c6c7a;
-  border-right: 1px solid #0a0a0a; border-bottom: 1px solid #0a0a0a; border-radius: 0;
+  margin: -7px 0; min-width: 10px; min-height: 14px;
+  background-color: #3a3a44;
+  border-top: 1px solid #6a6a7a; border-left: 1px solid #6a6a7a;
+  border-right: 1px solid #050508; border-bottom: 1px solid #050508; border-radius: 0;
 }
 
-/* ---- spectrum / VU window ---- */
+/* ===== visualizer ===== */
 .eaa-viz {
   background-color: #000000;
   border-top: 1px solid #000000; border-left: 1px solid #000000;
   border-right: 1px solid #2a2a32; border-bottom: 1px solid #2a2a32;
-  box-shadow: inset 0 0 8px rgba(0,0,0,0.95);
+  box-shadow: inset 0 0 8px rgba(0,0,0,1);
 }
 
-/* ---- EQ panel ---- */
+/* ===== EQ panel ===== */
 .eaa-eqbank {
   background-color: #000000;
-  border: 1px solid #0a0a0a;
-  box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
-  padding: 6px 6px;
+  border-top: 1px solid #000; border-left: 1px solid #000;
+  border-right: 1px solid #2a2a32; border-bottom: 1px solid #2a2a32;
+  box-shadow: inset 0 0 12px rgba(0,0,0,1);
+  padding: 4px 4px;
 }
-.eaa-eqlabel { color: #7fb0ff; font-family: "Pixelify Sans", sans-serif; font-size: 9px; letter-spacing: 1px; }
+.eaa-eqlabel { color: #5f86c8; font-family: "Pixelify Sans", sans-serif;
+  font-size: 8px; letter-spacing: 0; }
 .eaa-eqcurve {
-  background-color: #000000; border: 1px solid #0a0a0a;
-  box-shadow: inset 0 0 8px rgba(0,0,0,0.9);
+  background-color: #000000;
+  border-top: 1px solid #000; border-left: 1px solid #000;
+  border-right: 1px solid #2a2a32; border-bottom: 1px solid #2a2a32;
 }
 .eaa-eq trough {
   min-width: 7px;
-  background-image: linear-gradient(0deg, #14c814 0%, #c8c818 55%, #e02020 100%);
-  border: 1px solid #0a0a0a; border-radius: 0;
+  background-image: linear-gradient(0deg, #16c016 0%, #c8c818 52%, #e02020 100%);
+  border: 1px solid #000; border-radius: 0;
 }
 .eaa-eq highlight { background-color: transparent; }
 .eaa-eq slider {
-  margin: 0 -8px; min-width: 20px; min-height: 8px;
-  background-image: linear-gradient(180deg, #6a6a78 0%, #34343e 100%);
-  border-top: 1px solid #7a7a8a; border-left: 1px solid #7a7a8a;
-  border-right: 1px solid #0a0a0a; border-bottom: 1px solid #0a0a0a; border-radius: 0;
+  margin: 0 -9px; min-width: 22px; min-height: 7px;
+  background-color: #44444e;
+  border-top: 1px solid #76768a; border-left: 1px solid #76768a;
+  border-right: 1px solid #050508; border-bottom: 1px solid #050508; border-radius: 0;
 }
-.eaa-eq slider:hover { background-image: linear-gradient(180deg, #7a7a88 0%, #3e3e48 100%); }
+.eaa-eq slider:hover { background-color: #54545e; }
 
-/* ---- playlist ---- */
+/* ===== playlist ===== */
 .eaa-playlist {
   background-color: #000000;
-  border: 1px solid #0a0a0a;
-  box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
+  border-top: 1px solid #000; border-left: 1px solid #000;
+  border-right: 1px solid #2a2a32; border-bottom: 1px solid #2a2a32;
+  box-shadow: inset 0 0 12px rgba(0,0,0,1);
 }
 .eaa-playlist row { background-color: transparent; padding: 0; }
-.eaa-playlist row:selected { background-color: #233a8c; }
+.eaa-playlist row:selected { background-color: #1b3aa0; }
 .eaa-track {
-  color: #16e016;
+  color: #1eff1e;
   font-family: "Pixelify Sans", monospace;
   font-size: 12px;
-  padding: 1px 6px;
+  padding: 0 5px;
+  text-shadow: 0 0 4px rgba(30,255,30,0.4);
 }
-.eaa-playlist row:selected .eaa-track { color: #e6ecff; text-shadow: 0 0 4px rgba(120,150,255,0.6); }
+.eaa-playlist row:selected .eaa-track { color: #ffffff; text-shadow: 0 0 5px rgba(150,180,255,0.7); }
 .eaa-track.current { color: #ffffff; }
