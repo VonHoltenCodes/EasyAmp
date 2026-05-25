@@ -51,6 +51,8 @@ window.easyamp {
 /* ===== black LCD display ===== */
 .eaa-display {
   background-color: #000000;
+  background-image: radial-gradient(ellipse 150% 150% at 100% 100%,
+    #17285c 0%, #0a1430 42%, #000000 82%);
   border-top: 1px solid #000000;
   border-left: 1px solid #000000;
   border-right: 1px solid #34343e;
@@ -132,6 +134,10 @@ window.easyamp {
   border-top: 1px solid #4a4a52; border-left: 1px solid #4a4a52;
   border-right: 1px solid #eaeaf0; border-bottom: 1px solid #eaeaf0;
 }
+
+/* stacked symbol-over-text buttons (+ FILE / − FILE) */
+.eaa-btn-sym { font-size: 15px; font-weight: bold; color: #26262c; text-shadow: 0 1px 0 rgba(255,255,255,0.4); }
+.eaa-btn-txt { font-size: 8px; letter-spacing: 1px; color: #26262c; }
 
 .eaa-xsep { background-color: #050508; min-width: 2px; margin: 1px 3px;
   box-shadow: 1px 0 0 rgba(255,255,255,0.10); }

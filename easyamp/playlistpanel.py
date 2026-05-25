@@ -41,14 +41,28 @@ class PlaylistPanel(Gtk.Box):
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         actions.add_css_class("eaa-panel")
-        for label, cb in (("ADD", self._add), ("REM", self._rem),
-                          ("CLR", self._clear), ("LOAD", self._load),
-                          ("SAVE", self._save)):
+        actions.append(self._stacked("+", "FILE", self._add))
+        actions.append(self._stacked("−", "FILE", self._rem))
+        for label, cb in (("CLR", self._clear), ("LOAD", self._load), ("SAVE", self._save)):
             b = Gtk.Button(label=label)
             b.add_css_class("eaa-button")
             b.connect("clicked", cb)
             actions.append(b)
         self.append(actions)
+
+    def _stacked(self, symbol: str, text: str, cb) -> Gtk.Button:
+        b = Gtk.Button()
+        b.add_css_class("eaa-button")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        s = Gtk.Label(label=symbol)
+        s.add_css_class("eaa-btn-sym")
+        t = Gtk.Label(label=text)
+        t.add_css_class("eaa-btn-txt")
+        box.append(s)
+        box.append(t)
+        b.set_child(box)
+        b.connect("clicked", cb)
+        return b
 
     # ---- display ------------------------------------------------------
     def set_tracks(self, paths: list[str]) -> None:

@@ -9,10 +9,25 @@ mirrors each band's colour and reacts as you drag.
 
 from __future__ import annotations
 
+import cairo
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
+
+
+def paint_smoke(cr, w, h):
+    """Smoked dark-blue glow, strongest at the bottom-right, fading to
+    black toward the top-left (also lights the top-right / bottom-left)."""
+    cr.set_source_rgb(0, 0, 0)
+    cr.paint()
+    g = cairo.RadialGradient(w, h, 0, w, h, max(w, h) * 1.15)
+    g.add_color_stop_rgb(0.0, 0.11, 0.18, 0.40)
+    g.add_color_stop_rgb(0.45, 0.05, 0.09, 0.20)
+    g.add_color_stop_rgb(1.0, 0.0, 0.0, 0.0)
+    cr.set_source(g)
+    cr.paint()
 
 NBANDS = 10
 BAND_LABELS = ["60", "170", "310", "600", "1K", "3K", "6K", "12K", "14K", "16K"]
@@ -97,10 +112,9 @@ class EQWidget(Gtk.DrawingArea):
 
     # ---- drawing ------------------------------------------------------
     def _draw(self, _a, cr, w, h):
-        cr.set_source_rgb(0, 0, 0)
-        cr.paint()
         if w <= 0 or h <= 0:
             return
+        paint_smoke(cr, w, h)
         col_w = self._cols(w)
         top, bottom = self._slider_span(h)
         span = bottom - top
@@ -165,9 +179,13 @@ class EQWidget(Gtk.DrawingArea):
             cr.line_to(tx + tw, ty + th)
             cr.line_to(tx, ty + th)
             cr.stroke()
-            cr.set_source_rgb(0.20, 0.20, 0.24)   # centre dot
-            cr.arc(cx, ty + th / 2, 1.6, 0, 6.2832)
-            cr.fill()
+            cr.set_source_rgb(0.22, 0.22, 0.26)   # "=" grip lines
+            cr.set_line_width(1.2)
+            midy = ty + th / 2
+            for off in (-1.8, 1.8):
+                cr.move_to(cx - 4, midy + off)
+                cr.line_to(cx + 4, midy + off)
+            cr.stroke()
 
             # label
             cr.set_source_rgb(0.42, 0.58, 0.85)

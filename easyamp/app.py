@@ -77,8 +77,8 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
         self.add_css_class("easyamp")
         self.set_resizable(True)
-        self.set_default_size(660, 470)
-        self.set_size_request(560, 420)
+        self.set_default_size(680, 470)
+        self.set_size_request(640, 440)
 
         self.set_titlebar(window_title_bar("EASYAMP"))
 
@@ -109,6 +109,10 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             inds.append(w)
         lcd.append(inds)
         self.marquee_lbl = self._mk(Gtk.Label(label="EASYAMP  *  READY", xalign=0), "eaa-lcd")
+        # fixed character width so the proportional font can't resize the
+        # left column (and shift the playlist divider) as the text scrolls
+        self.marquee_lbl.set_width_chars(MARQUEE_WIDTH)
+        self.marquee_lbl.set_max_width_chars(MARQUEE_WIDTH)
         lcd.append(self.marquee_lbl)
         self.marquee = Marquee(self.marquee_lbl)
         self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1000, 1)
@@ -385,12 +389,14 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             for s in range(lit):
                 y = h - (s + 1) * (seg_h + seg_gap)
                 frac = s / max(total - 1, 1)
-                if frac > 0.85:
-                    cr.set_source_rgb(0.90, 0.12, 0.10)
-                elif frac > 0.62:
-                    cr.set_source_rgb(0.90, 0.82, 0.12)
+                if frac > 0.80:
+                    cr.set_source_rgb(0.90, 0.13, 0.10)   # red
+                elif frac > 0.58:
+                    cr.set_source_rgb(0.93, 0.45, 0.10)   # orange
+                elif frac > 0.36:
+                    cr.set_source_rgb(0.92, 0.82, 0.14)   # yellow
                 else:
-                    cr.set_source_rgb(0.12, 0.90, 0.20)
+                    cr.set_source_rgb(0.14, 0.88, 0.20)   # green
                 cr.rectangle(x, y, bw, seg_h)
                 cr.fill()
             ps = int(float(peaks[i]) * total)
