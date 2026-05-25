@@ -9,7 +9,7 @@ from gi.repository import Gtk  # noqa: E402
 
 from . import eqpresets  # noqa: E402
 from .eqwidget import EQWidget, NBANDS  # noqa: E402
-from .widgets import panel_bar  # noqa: E402
+from .widgets import panel_bar, make_button, set_led  # noqa: E402
 
 
 class EQPanel(Gtk.Box):
@@ -22,10 +22,9 @@ class EQPanel(Gtk.Box):
 
         ctl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         ctl.add_css_class("eaa-transport")
-        self.btn_on = Gtk.ToggleButton(label="ON")
-        self.btn_on.add_css_class("eaa-button")
+        self.btn_on = make_button("ON", toggle=True, led=True)
         self.btn_on.set_active(True)
-        self.btn_on.add_css_class("on")
+        set_led(self.btn_on, True)
         self.btn_on.connect("toggled", self._on_toggle)
         ctl.append(self.btn_on)
         ctl.append(Gtk.Box(hexpand=True))
@@ -94,7 +93,7 @@ class EQPanel(Gtk.Box):
     # ---- bypass / push ------------------------------------------------
     def _on_toggle(self, btn):
         self._on = btn.get_active()
-        (btn.add_css_class if self._on else btn.remove_css_class)("on")
+        set_led(btn, self._on)
         self._push()
 
     def _on_change(self):

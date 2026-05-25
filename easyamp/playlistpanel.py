@@ -54,6 +54,7 @@ class PlaylistPanel(Gtk.Box):
         b = Gtk.Button()
         b.add_css_class("eaa-button")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_halign(Gtk.Align.CENTER)
         s = Gtk.Label(label=symbol)
         s.add_css_class("eaa-btn-sym")
         t = Gtk.Label(label=text)

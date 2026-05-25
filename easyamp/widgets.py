@@ -31,6 +31,32 @@ class GoldBars(Gtk.DrawingArea):
         cr.stroke()
 
 
+def make_button(label: str, toggle: bool = False, led: bool = False):
+    """A beveled button, optionally a toggle and/or with a small square LED."""
+    btn = Gtk.ToggleButton() if toggle else Gtk.Button()
+    btn.add_css_class("eaa-button")
+    if led:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        box.set_halign(Gtk.Align.CENTER)
+        ledw = Gtk.Box()
+        ledw.add_css_class("eaa-led")
+        ledw.set_valign(Gtk.Align.CENTER)
+        box.append(ledw)
+        box.append(Gtk.Label(label=label))
+        btn.set_child(box)
+        btn._led = ledw
+    else:
+        btn.set_label(label)
+        btn._led = None
+    return btn
+
+
+def set_led(btn, on: bool) -> None:
+    led = getattr(btn, "_led", None)
+    if led is not None:
+        (led.add_css_class if on else led.remove_css_class)("on")
+
+
 def panel_bar(text: str) -> Gtk.Box:
     """A blue title bar: gold bars | centered EASYAMP label | gold bars."""
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)

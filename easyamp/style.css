@@ -99,41 +99,40 @@ window.easyamp {
   padding: 3px 4px;
 }
 
-/* light-grey hard-beveled buttons with dark glyphs (transport + labels) */
+/* light-grey 3D buttons: double bevel (white TL / dark BR + inner ridge) */
 .eaa-xport,
 .eaa-button {
-  background-color: #bcbcc4;
-  background-image: repeating-linear-gradient(
-    0deg, rgba(255,255,255,0.30) 0px, rgba(255,255,255,0.30) 1px,
-    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 3px);
-  color: #26262c;
-  border-top: 1px solid #eaeaf0;
-  border-left: 1px solid #eaeaf0;
-  border-right: 1px solid #4a4a52;
-  border-bottom: 1px solid #4a4a52;
+  background-color: #c4c4cc;
+  color: #1e1e24;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #ffffff;
+  border-right: 1px solid #2c2c32;
+  border-bottom: 1px solid #2c2c32;
+  box-shadow: inset 1px 1px 0 #ededf2, inset -1px -1px 0 #8a8a92;
   border-radius: 0;
-  text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+  min-width: 0;
+  outline: none;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.5);
 }
-.eaa-xport {
-  min-width: 32px; min-height: 24px; padding: 0; font-size: 13px;
+.eaa-xport { min-width: 30px; min-height: 26px; padding: 0; font-size: 14px; }
+.eaa-button { min-height: 24px; padding: 1px 9px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
+.eaa-xport:hover, .eaa-button:hover { background-color: #d0d0d8; }
+.eaa-xport:active, .eaa-button:active, .eaa-button:checked {
+  background-color: #aeaeb6;
+  border-top: 1px solid #2c2c32; border-left: 1px solid #2c2c32;
+  border-right: 1px solid #ffffff; border-bottom: 1px solid #ffffff;
+  box-shadow: inset 1px 1px 0 #8a8a92;
 }
-.eaa-button {
-  min-height: 22px; padding: 0 8px; font-size: 10px; font-weight: bold; letter-spacing: 1px;
+.eaa-button.on { color: #0a6a0a; }
+
+/* small square pixel LED */
+.eaa-led {
+  min-width: 8px; min-height: 8px;
+  background-color: #0b2a0b;
+  border-top: 1px solid #040a04; border-left: 1px solid #040a04;
+  border-right: 1px solid #1c3c1c; border-bottom: 1px solid #1c3c1c;
 }
-.eaa-xport:hover, .eaa-button:hover { background-color: #c8c8d0; color: #000; }
-.eaa-xport:active, .eaa-button:active {
-  background-color: #9a9aa2;
-  border-top: 1px solid #4a4a52; border-left: 1px solid #4a4a52;
-  border-right: 1px solid #eaeaf0; border-bottom: 1px solid #eaeaf0;
-}
-/* engaged toggle: pressed-in + green legend */
-.eaa-xport.playing { color: #0a7a0a; }
-.eaa-button.on {
-  color: #0a6a0a;
-  background-color: #9a9aa2;
-  border-top: 1px solid #4a4a52; border-left: 1px solid #4a4a52;
-  border-right: 1px solid #eaeaf0; border-bottom: 1px solid #eaeaf0;
-}
+.eaa-led.on { background-color: #2bff2b; box-shadow: 0 0 5px rgba(43,255,43,0.95); }
 
 /* stacked symbol-over-text buttons (+ FILE / − FILE) */
 .eaa-btn-sym { font-size: 15px; font-weight: bold; color: #26262c; text-shadow: 0 1px 0 rgba(255,255,255,0.4); }
@@ -167,11 +166,17 @@ window.easyamp {
   background-color: #1eff1e;
   box-shadow: 0 0 5px rgba(30,255,30,0.8); border-radius: 0;
 }
+/* seek grip: light grey with 3 vertical parallel lines */
 .eaa-seek slider {
-  margin: -7px 0; min-width: 10px; min-height: 14px;
-  background-color: #3a3a44;
-  border-top: 1px solid #6a6a7a; border-left: 1px solid #6a6a7a;
-  border-right: 1px solid #050508; border-bottom: 1px solid #050508; border-radius: 0;
+  margin: -7px 0; min-width: 18px; min-height: 15px;
+  background-color: #c4c4cc;
+  background-image: linear-gradient(90deg,
+    #c4c4cc 0%, #c4c4cc 33%, #34343a 33%, #34343a 39%,
+    #c4c4cc 39%, #c4c4cc 55%, #34343a 55%, #34343a 61%,
+    #c4c4cc 61%, #c4c4cc 77%, #34343a 77%, #34343a 83%,
+    #c4c4cc 83%, #c4c4cc 100%);
+  border-top: 1px solid #ffffff; border-left: 1px solid #ffffff;
+  border-right: 1px solid #2e2e34; border-bottom: 1px solid #2e2e34; border-radius: 0;
 }
 
 /* ===== visualizer ===== */

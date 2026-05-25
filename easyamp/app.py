@@ -17,7 +17,7 @@ from .spectrum import SpectrumCapture  # noqa: E402
 from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
-from .widgets import window_title_bar  # noqa: E402
+from .widgets import window_title_bar, make_button, set_led  # noqa: E402
 
 APP_ID = "codes.vonholten.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
@@ -142,11 +142,15 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         for b in (self.btn_open, self.btn_prev, self.btn_play, self.btn_stop, self.btn_next):
             xport.append(b)
         xport.append(self._sep())
-        self.btn_eq = self._tbtn("EQ", self.on_toggle_eq, active=True)
-        self.btn_pl = self._tbtn("PL", self.on_toggle_pl, active=True)
-        self.btn_viz = Gtk.Button(label="VU")
-        self.btn_viz.add_css_class("eaa-button")
+        self.btn_eq = make_button("EQ", led=True)
+        self.btn_eq.connect("clicked", self.on_toggle_eq)
+        set_led(self.btn_eq, True)
+        self.btn_pl = make_button("PL", led=True)
+        self.btn_pl.connect("clicked", self.on_toggle_pl)
+        set_led(self.btn_pl, True)
+        self.btn_viz = make_button("VU", led=True)
         self.btn_viz.connect("clicked", self.on_toggle_viz)
+        set_led(self.btn_viz, False)
         xport.append(self.btn_eq)
         xport.append(self.btn_pl)
         xport.append(self.btn_viz)
@@ -201,14 +205,6 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         b.connect("clicked", cb)
         return b
 
-    def _tbtn(self, label, cb, active=False):
-        b = Gtk.Button(label=label)
-        b.add_css_class("eaa-button")
-        if active:
-            b.add_css_class("on")
-        b.connect("clicked", cb)
-        return b
-
     def _sep(self):
         s = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         s.add_css_class("eaa-xsep")
@@ -218,12 +214,12 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
     def on_toggle_eq(self, btn):
         vis = not self.eq_panel.get_visible()
         self.eq_panel.set_visible(vis)
-        (btn.add_css_class if vis else btn.remove_css_class)("on")
+        set_led(btn, vis)
 
     def on_toggle_pl(self, btn):
         vis = not self.playlist_panel.get_visible()
         self.playlist_panel.set_visible(vis)
-        (btn.add_css_class if vis else btn.remove_css_class)("on")
+        set_led(btn, vis)
 
     # ---- playlist management -----------------------------------------
     def _pl_add(self, paths):
@@ -357,7 +353,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
     # ---- visualizer ---------------------------------------------------
     def on_toggle_viz(self, _b):
         self._viz_mode = "vu" if self._viz_mode == "spec" else "spec"
-        self.btn_viz.set_label("SPEC" if self._viz_mode == "vu" else "VU")
+        set_led(self.btn_viz, self._viz_mode == "vu")
         self.viz.queue_draw()
 
     def _on_data(self, levels, vu):
