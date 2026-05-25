@@ -26,7 +26,19 @@ EasyAmp plays your local music through its own GStreamer pipeline (with a built-
 - A working audio server (**PipeWire** or PulseAudio) for the visualizer capture
 - Fonts (OFL) — **DSEG7 Classic** and **Pixelify Sans** ship bundled and auto-install on first run
 
-## Install
+## Download
+
+Grab a ready-to-run build from the **[latest release](https://github.com/VonHoltenCodes/EasyAmp/releases/latest)**:
+
+| Platform | Download | Notes |
+|----------|----------|-------|
+| 🪟 **Windows** (x64) | **[Installer (.exe)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-Setup-x64.exe)** · [Portable (.zip)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-windows-x64.zip) | Unsigned — at the SmartScreen prompt click **More info → Run anyway** |
+| 🍎 **macOS** (Apple Silicon) | **[Disk image (.dmg)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-macos-arm64.dmg)** | Unsigned — right-click the app → **Open**. Visualizer needs a loopback device (e.g. BlackHole) |
+| 🐧 **Linux** | **[Flatpak bundle](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp.flatpak)** | `flatpak install --user EasyAmp.flatpak` |
+
+> Everything is bundled — no Python or GTK install required. To build from source instead, see below.
+
+## Install (from source)
 
 See **[INSTALL.md](INSTALL.md)** for full per-OS instructions. In short: install
 the native prerequisites (GTK4 + PyGObject + GStreamer) from your OS package
