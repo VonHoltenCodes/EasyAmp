@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>codes.vonholten.EasyAmp</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>EasyAmp</name>
+  <summary>Classic-player-style media player with a 10-band EQ</summary>
+
+  <description>
+    <p>
+      EasyAmp is a self-contained classic-player-style media player — a loving
+      tribute to the late-90s desktop audio player, built fresh in GTK4 with
+      original artwork.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Plays local music (MP3, FLAC, WAV, OGG, Opus, M4A and more)</li>
+      <li>Built-in 10-band graphic EQ with a response curve and presets</li>
+      <li>Bass and Loudness tone toggles</li>
+      <li>Live spectrum analyzer and analog VU meters</li>
+      <li>Playlist with m3u load/save</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">codes.vonholten.EasyAmp.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Spectrum analyzer view</caption>
+      <image>https://raw.githubusercontent.com/VonHoltenCodes/EasyAmp/main/assets/easyamp-spectrum.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Analog VU meters view</caption>
+      <image>https://raw.githubusercontent.com/VonHoltenCodes/EasyAmp/main/assets/easyamp-vu.png</image>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://github.com/VonHoltenCodes/EasyAmp</url>
+  <developer id="codes.vonholten">
+    <name>VonHoltenCodes (Trenton Von Holten)</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.2.0" date="2026-05-25">
+      <description>
+        <p>Self-contained player + 10-band EQ, spectrum/VU visualizers,
+        bass/loudness toggles, and Flatpak packaging.</p>
+      </description>
+    </release>
+  </releases>
+</component>

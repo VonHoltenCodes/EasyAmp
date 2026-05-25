@@ -1,0 +1,53 @@
+app-id: codes.vonholten.EasyAmp
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: easyamp
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio          # playback + monitor capture for the visualizer
+  - --filesystem=xdg-music:ro
+  - --filesystem=xdg-download:ro
+  # other locations are reached through the file-chooser portal
+
+modules:
+  # ---- numpy (prebuilt cp312 wheel; matches the GNOME 48 runtime python) ----
+  - name: python3-numpy
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-build-isolation --prefix=${FLATPAK_DEST}
+        numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/99/60/14115e6364fa676c5397c2ad3004e527e9aa487abf5d0706ec81bbd08529/numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+        sha256: 90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853
+
+  # ---- EasyAmp itself, from this source tree ----
+  - name: easyamp
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-build-isolation --no-deps --prefix=${FLATPAK_DEST} .
+      - install -Dm644 data/codes.vonholten.EasyAmp.desktop
+        ${FLATPAK_DEST}/share/applications/codes.vonholten.EasyAmp.desktop
+      - install -Dm644 data/codes.vonholten.EasyAmp.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/codes.vonholten.EasyAmp.metainfo.xml
+      - install -Dm644 assets/icons/easyamp-256.png
+        ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/codes.vonholten.EasyAmp.png
+      - install -Dm644 assets/icons/easyamp-128.png
+        ${FLATPAK_DEST}/share/icons/hicolor/128x128/apps/codes.vonholten.EasyAmp.png
+      - install -Dm644 assets/easyamp-logo.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/codes.vonholten.EasyAmp.svg
+      # also drop the bundled fonts where fontconfig sees them in-sandbox
+      - install -Dm644 easyamp/fonts/DSEG7Classic-Regular.ttf
+        ${FLATPAK_DEST}/share/fonts/easyamp/DSEG7Classic-Regular.ttf
+      - install -Dm644 easyamp/fonts/DSEG7Classic-Bold.ttf
+        ${FLATPAK_DEST}/share/fonts/easyamp/DSEG7Classic-Bold.ttf
+      - install -Dm644 easyamp/fonts/PixelifySans.ttf
+        ${FLATPAK_DEST}/share/fonts/easyamp/PixelifySans.ttf
+    sources:
+      - type: dir
+        path: ..
