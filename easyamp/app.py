@@ -98,8 +98,8 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         left_cell.set_valign(Gtk.Align.CENTER)
         self.lcd_time = self._mk(Gtk.Label(label="00:00"), "eaa-bignum")
         left_cell.append(self.lcd_time)
-        self.scope = Gtk.DrawingArea()       # mini waveform under the timer
-        self.scope.set_content_height(14)
+        self.scope = Gtk.DrawingArea()       # mini bar-graph scope under the timer
+        self.scope.set_content_height(20)
         self.scope.set_hexpand(True)
         self.scope.set_draw_func(self._draw_scope)
         left_cell.append(self.scope)
@@ -368,29 +368,56 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         return False
 
     def _draw_scope(self, _a, cr, w, h):
-        """White mirrored waveform: magnitude reflected above and below
-        the centre line, filled."""
+        """White mirrored bar graph with a faint grid and alternating
+        light/dark blue dots along the bottom and left axes."""
         wave = self._wave
         n = len(wave)
         if n < 2 or w <= 0 or h <= 0:
             return
         mid = h / 2
-        amp = h * 0.46
+        amp = h * 0.44
 
-        def xx(i):
-            return w * i / (n - 1)
-
-        cr.move_to(0, mid)
-        for i in range(n):
-            cr.line_to(xx(i), mid - abs(float(wave[i])) * amp)   # top envelope
-        for i in range(n - 1, -1, -1):
-            cr.line_to(xx(i), mid + abs(float(wave[i])) * amp)   # bottom mirror
-        cr.close_path()
-        cr.set_source_rgba(0.95, 0.96, 1.0, 0.30)
-        cr.fill_preserve()
-        cr.set_source_rgb(0.96, 0.97, 1.0)
+        # faint grid
+        cr.set_source_rgba(0.40, 0.52, 0.85, 0.13)
         cr.set_line_width(1)
+        for c in range(1, 8):
+            x = round(w * c / 8) + 0.5
+            cr.move_to(x, 0)
+            cr.line_to(x, h)
+        for r in (0.25, 0.5, 0.75):
+            y = round(h * r) + 0.5
+            cr.move_to(0, y)
+            cr.line_to(w, y)
         cr.stroke()
+
+        # white mirrored bars
+        nbars = 22
+        bw = w / nbars
+        cr.set_source_rgb(0.96, 0.97, 1.0)
+        for b in range(nbars):
+            i = min(int(b / nbars * n), n - 1)
+            mag = abs(float(wave[i])) * amp
+            cr.rectangle(b * bw + 1, mid - mag, bw - 1.5, mag * 2)
+            cr.fill()
+
+        # alternating light/dark blue dots along bottom + left axes
+        light, dark = (0.46, 0.66, 1.0), (0.12, 0.22, 0.52)
+        k = 0
+        x = 1
+        while x < w - 1:
+            cr.set_source_rgb(*(light if k % 2 == 0 else dark))
+            cr.rectangle(x, h - 2, 2, 2)
+            cr.fill()
+            x += 6
+            k += 1
+        k = 0
+        y = 1
+        while y < h - 1:
+            cr.set_source_rgb(*(light if k % 2 == 0 else dark))
+            cr.rectangle(0, y, 2, 2)
+            cr.fill()
+            y += 6
+            k += 1
 
     def _draw_viz(self, _area, cr, w, h):
         cr.set_source_rgb(0, 0, 0)
