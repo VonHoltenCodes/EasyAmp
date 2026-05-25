@@ -97,53 +97,41 @@ window.easyamp {
   padding: 3px 4px;
 }
 
-/* small, tight, hard-beveled transport buttons */
-.eaa-xport {
-  min-width: 32px;
-  min-height: 24px;
-  padding: 0;
-  font-size: 13px;
-  background-color: #2c2c34;
-  background-image: repeating-linear-gradient(
-    0deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px,
-    rgba(0,0,0,0.10) 2px, rgba(0,0,0,0.10) 3px);
-  color: #c4ccdc;
-  border-top: 1px solid #5e5e70;
-  border-left: 1px solid #5e5e70;
-  border-right: 1px solid #050508;
-  border-bottom: 1px solid #050508;
-  border-radius: 0;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.9);
-}
-.eaa-xport:hover { color: #fff; }
-.eaa-xport:active {
-  background-color: #1a1a20;
-  border-top: 1px solid #050508; border-left: 1px solid #050508;
-  border-right: 1px solid #5e5e70; border-bottom: 1px solid #5e5e70;
-}
-.eaa-xport.playing { color: #2bff2b; text-shadow: 0 0 8px rgba(30,255,30,1); }
-
-/* small labeled buttons (EQ / PL / ON / PRESETS / playlist) */
+/* light-grey hard-beveled buttons with dark glyphs (transport + labels) */
+.eaa-xport,
 .eaa-button {
-  min-height: 22px;
-  padding: 0 8px;
-  font-size: 10px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  background-color: #2c2c34;
+  background-color: #bcbcc4;
   background-image: repeating-linear-gradient(
-    0deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px,
-    rgba(0,0,0,0.10) 2px, rgba(0,0,0,0.10) 3px);
-  color: #b6bed0;
-  border-top: 1px solid #5e5e70;
-  border-left: 1px solid #5e5e70;
-  border-right: 1px solid #050508;
-  border-bottom: 1px solid #050508;
+    0deg, rgba(255,255,255,0.30) 0px, rgba(255,255,255,0.30) 1px,
+    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 3px);
+  color: #26262c;
+  border-top: 1px solid #eaeaf0;
+  border-left: 1px solid #eaeaf0;
+  border-right: 1px solid #4a4a52;
+  border-bottom: 1px solid #4a4a52;
   border-radius: 0;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.9);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.4);
 }
-.eaa-button:hover { color: #6cff6c; }
-.eaa-button.on { color: #2bff2b; text-shadow: 0 0 6px rgba(30,255,30,0.9); background-color: #1d2a1d; }
+.eaa-xport {
+  min-width: 32px; min-height: 24px; padding: 0; font-size: 13px;
+}
+.eaa-button {
+  min-height: 22px; padding: 0 8px; font-size: 10px; font-weight: bold; letter-spacing: 1px;
+}
+.eaa-xport:hover, .eaa-button:hover { background-color: #c8c8d0; color: #000; }
+.eaa-xport:active, .eaa-button:active {
+  background-color: #9a9aa2;
+  border-top: 1px solid #4a4a52; border-left: 1px solid #4a4a52;
+  border-right: 1px solid #eaeaf0; border-bottom: 1px solid #eaeaf0;
+}
+/* engaged toggle: pressed-in + green legend */
+.eaa-xport.playing { color: #0a7a0a; }
+.eaa-button.on {
+  color: #0a6a0a;
+  background-color: #9a9aa2;
+  border-top: 1px solid #4a4a52; border-left: 1px solid #4a4a52;
+  border-right: 1px solid #eaeaf0; border-bottom: 1px solid #eaeaf0;
+}
 
 .eaa-xsep { background-color: #050508; min-width: 2px; margin: 1px 3px;
   box-shadow: 1px 0 0 rgba(255,255,255,0.10); }

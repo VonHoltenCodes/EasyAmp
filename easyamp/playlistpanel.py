@@ -9,6 +9,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gio, GLib  # noqa: E402
 
+from .widgets import panel_bar  # noqa: E402
+
 AUDIO_PATTERNS = ("*.mp3", "*.flac", "*.wav", "*.ogg", "*.opus",
                   "*.m4a", "*.aac", "*.wma", "*.mp4")
 
@@ -24,12 +26,7 @@ class PlaylistPanel(Gtk.Box):
         self._tracks: list[str] = []
         self._current = -1
 
-        bar = Gtk.CenterBox()
-        bar.add_css_class("eaa-panelbar")
-        lbl = Gtk.Label(label="PLAYLIST")
-        lbl.add_css_class("eaa-panelbar-label")
-        bar.set_center_widget(lbl)
-        self.append(bar)
+        self.append(panel_bar("EASYAMP PLAYLIST"))
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_vexpand(True)

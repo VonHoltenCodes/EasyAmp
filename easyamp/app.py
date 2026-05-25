@@ -17,6 +17,7 @@ from .spectrum import SpectrumCapture  # noqa: E402
 from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
+from .widgets import window_title_bar  # noqa: E402
 
 APP_ID = "codes.vonholten.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
@@ -79,13 +80,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.set_default_size(660, 470)
         self.set_size_request(560, 420)
 
-        bar = Gtk.CenterBox()
-        bar.add_css_class("eaa-titlebar")
-        bar.set_center_widget(self._mk(Gtk.Label(label="E A S Y A M P"), "eaa-title"))
-        bar.set_end_widget(Gtk.WindowControls(side=Gtk.PackType.END))
-        handle = Gtk.WindowHandle()
-        handle.set_child(bar)
-        self.set_titlebar(handle)
+        self.set_titlebar(window_title_bar("EASYAMP"))
 
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
         outer.add_css_class("eaa-chassis")
