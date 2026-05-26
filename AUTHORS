@@ -7,6 +7,10 @@ Main author & creator:
 Co-author:
   Claude (Anthropic's Claude Code)
 
+Testing & QA:
+  Keith (@ContractorKeith)  <https://github.com/ContractorKeith>
+    — macOS testing; diagnosed the GTK-bundling launch crash on Apple Silicon
+
 Third-party work EasyAmp builds on or credits (see README "Credits"):
   - EasyEffects                — Wellington Wallace (wwmm)
   - EasyEffects-Presets        — JackHack96

@@ -78,6 +78,10 @@ EasyAmp stands on a lot of open-source work — thank you to:
 - **[DSEG](https://github.com/keshikan/DSEG)** 7-segment font by keshikan (SIL OFL).
 - **[Pixelify Sans](https://fonts.google.com/specimen/Pixelify+Sans)** by Stefie Justprince (SIL OFL).
 
+**Testing & QA**
+
+- **[@ContractorKeith](https://github.com/ContractorKeith)** — macOS testing; diagnosed the GTK-bundling launch crash on Apple Silicon.
+
 If you maintain something EasyAmp uses and want different/expanded credit, please open an issue.
 
 ## License
