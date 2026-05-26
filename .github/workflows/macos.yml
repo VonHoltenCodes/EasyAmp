@@ -47,6 +47,13 @@ jobs:
           cd packaging/macos
           pyinstaller --noconfirm --clean EasyAmp.spec
 
+      - name: Verify GTK got bundled
+        run: |
+          APP=packaging/macos/dist/EasyAmp.app
+          echo "Gtk typelib: $(find "$APP" -iname 'Gtk-4.0.typelib' | head -1 || echo MISSING)"
+          echo "libgtk dylib: $(find "$APP" -iname 'libgtk-4*' | head -1 || echo MISSING)"
+          test -n "$(find "$APP" -iname 'Gtk-4.0.typelib')" || { echo 'ERROR: Gtk typelib missing'; exit 1; }
+
       - name: Ad-hoc code-sign the .app
         run: |
           # PyInstaller rewrites the bundled dylibs' load paths, which
