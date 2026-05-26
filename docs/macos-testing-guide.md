@@ -7,9 +7,10 @@ a second pair of eyes (and ears) on the macOS build.
 There are **two ways** to test. Option A (download the prebuilt app) is easiest.
 Option B (build from source) is the fallback if the prebuilt one won't run.
 
-> **Mac type matters.** The prebuilt app is **Apple Silicon only** (M1/M2/M3/M4,
-> `arm64`). If you have an **Intel** Mac, skip to **Option B**.
-> To check: Apple menu →  About This Mac → look at "Chip" / "Processor".
+> **Mac type matters.** The prebuilt app is **Apple Silicon** (M1/M2/M3/M4,
+> `arm64`). If you have an **Intel** Mac, skip to **Option B** (build from
+> source) — GitHub no longer offers Intel build machines for the prebuilt one.
+> To check: Apple menu → About This Mac → "Chip"/"Processor".
 >
 > **macOS 12 (Monterey) or newer** is required.
 

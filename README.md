@@ -33,7 +33,7 @@ Grab a ready-to-run build from the **[latest release](https://github.com/VonHolt
 | Platform | Download | Notes |
 |----------|----------|-------|
 | 🪟 **Windows** (x64) | **[Installer (.exe)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-Setup-x64.exe)** · [Portable (.zip)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-windows-x64.zip) | Unsigned — at the SmartScreen prompt click **More info → Run anyway** |
-| 🍎 **macOS** (Apple Silicon) | **[Disk image (.dmg)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-macos-arm64.dmg)** | Unsigned — right-click the app → **Open**. Visualizer needs a loopback device (e.g. BlackHole) |
+| 🍎 **macOS** (Apple Silicon) | **[Disk image (.dmg)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-macos-arm64.dmg)** | Unsigned — right-click the app → **Open**. Intel Macs: build from source ([INSTALL.md](INSTALL.md)). Visualizer needs a loopback device (e.g. BlackHole) |
 | 🐧 **Linux** | **[Flatpak bundle](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp.flatpak)** | `flatpak install --user EasyAmp.flatpak` |
 
 > Everything is bundled — no Python or GTK install required. To build from source instead, see below.
