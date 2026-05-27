@@ -232,7 +232,7 @@ class EQView(Gtk.Box):
             self.refresh()
 
     def _on_reset(self, _b):
-        self.win.player.reset_eq()
+        self.win.player.reset_bands()          # gains + freq/Q back to defaults
         for k in (self.k_preamp, self.k_in, self.k_out, self.k_bal):
             k.set_value(0.0)
         self.k_pitch.set_value(1.0)
@@ -240,6 +240,7 @@ class EQView(Gtk.Box):
         self.win.player.set_balance(0); self.win.player.set_pitch(1.0)
         self.win.player.set_preamp(0)
         self.refresh()
+        self._on_select(self._selected)        # re-sync SEL FREQ/Q knobs
 
     # ---- meters (fed from the window's capture) ----
     def set_audio(self, levels, wave):

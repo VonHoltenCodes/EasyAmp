@@ -194,6 +194,11 @@ class Player:
         for i in range(self._nbands):
             self.set_band(i, 0.0)
 
+    def reset_bands(self) -> None:
+        """Full reset: restore default freqs + Q and zero gains for the current
+        band count (used by the EQ view's RESET)."""
+        self._configure_bands(_band_freqs(self._nbands))
+
     # ---- equalizer: parametric API -----------------------------------
     def band_count(self) -> int:
         return self._nbands
