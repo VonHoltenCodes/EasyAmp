@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easyamp"
-version = "0.4.1"
+version = "0.4.2"
 description = "Classic-player-style media player with a built-in parametric EQ (GTK4)"
 readme = "README.md"
 license = { text = "MIT" }

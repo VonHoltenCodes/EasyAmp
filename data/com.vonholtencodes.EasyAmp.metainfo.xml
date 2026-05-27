@@ -42,6 +42,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.2" date="2026-05-27">
+      <description>
+        <p>The pitch (varispeed) control now works on macOS and the Flatpak as
+        well, via the built-in resampler.</p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-05-27">
       <description>
         <p>Add independent left/right EQ: a SPLIT toggle in the equalizer view
