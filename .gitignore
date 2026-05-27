@@ -21,3 +21,4 @@ packaging/README-flathub.md
 _ostree-repo/
 easyamp.flatpakrepo
 easyamp.flatpakref
+publish-flatpak.sh
