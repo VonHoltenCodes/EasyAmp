@@ -27,8 +27,8 @@ def _labeled(label_text, widget):
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
     box.add_css_class("eaa-ctl")
     box.set_halign(Gtk.Align.CENTER)
-    box.set_margin_start(8)
-    box.set_margin_end(8)
+    box.set_margin_start(4)
+    box.set_margin_end(4)
     lbl = Gtk.Label(label=label_text)
     lbl.add_css_class("eaa-ctl-lbl")
     box.append(lbl)
@@ -93,13 +93,19 @@ class EQView(Gtk.Box):
         frame.append(self.bank)
         self.append(frame)
 
-        # ---- knob controls row ----
-        ctl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        ctl.add_css_class("eaa-panel")
-        ctl.set_margin_top(4)
-        ctl.set_margin_bottom(4)
+        # ---- controls: two fixed rows (bounded height, fit at default width)
+        ctl_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        ctl_wrap.add_css_class("eaa-panel")
+        ctl_wrap.set_margin_top(4)
+        ctl_wrap.set_margin_bottom(4)
+        row1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        row1.set_halign(Gtk.Align.CENTER)
+        row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        row2.set_halign(Gtk.Align.CENTER)
+        ctl_wrap.append(row1)
+        ctl_wrap.append(row2)
 
-        # channel: SPLIT toggle (default = linked stereo) + L/R selector
+        # row 1: channel + output knobs
         self._channel = STEREO
         ch_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         self.btn_split = make_button("SPLIT", toggle=True, led=True)
@@ -115,62 +121,55 @@ class EQView(Gtk.Box):
         self.btn_r.connect("toggled", lambda b: b.get_active() and self._on_chan(RIGHT))
         ch_box.append(self.btn_l)
         ch_box.append(self.btn_r)
-        ctl.append(_labeled("CHANNEL", ch_box))
+        row1.append(_labeled("CHANNEL", ch_box))
 
         self.k_bands = Knob(10, 32, p.band_count(), step=1, default=10,
                             fmt=lambda v: f"{int(v)}", on_change=self._on_bands)
-        ctl.append(_labeled("BANDS", self.k_bands))
+        row1.append(_labeled("BANDS", self.k_bands))
         self.k_preamp = Knob(-12, 12, 0, step=0.5, default=0,
                              fmt=lambda v: f"{v:+.1f}", on_change=p.set_preamp)
-        ctl.append(_labeled("PREAMP", self.k_preamp))
+        row1.append(_labeled("PREAMP", self.k_preamp))
         self.k_in = Knob(-12, 12, 0, step=0.5, default=0,
                          fmt=lambda v: f"{v:+.1f}", on_change=p.set_in_gain)
-        ctl.append(_labeled("IN", self.k_in))
+        row1.append(_labeled("IN", self.k_in))
         self.k_out = Knob(-12, 12, 0, step=0.5, default=0,
                           fmt=lambda v: f"{v:+.1f}", on_change=p.set_out_gain)
-        ctl.append(_labeled("OUT", self.k_out))
+        row1.append(_labeled("OUT", self.k_out))
         self.k_bal = Knob(-1, 1, 0, step=0.05, default=0,
                           fmt=_bal_fmt, on_change=p.set_balance)
-        ctl.append(_labeled("BALANCE", self.k_bal))
+        row1.append(_labeled("BALANCE", self.k_bal))
         self.k_pitch = Knob(0.90, 1.10, 1.0, step=0.01, default=1.0,
                             fmt=lambda v: f"{v:.2f}x", on_change=p.set_pitch)
         self.k_pitch.set_sensitive(p.has_pitch())
-        ctl.append(_labeled("PITCH" if p.has_pitch() else "PITCH n/a", self.k_pitch))
+        row1.append(_labeled("PITCH" if p.has_pitch() else "PITCH n/a", self.k_pitch))
 
-        # selected-band parametric controls (freq is log-scaled)
+        # row 2: selected-band parametric controls + presets / import / export
         self._selected = 0
         self.k_freq = Knob(math.log10(20), math.log10(20000), math.log10(1000),
                            step=0.02, default=math.log10(1000),
                            fmt=lambda v: _fmt_freq(10 ** v), on_change=self._on_freq)
-        ctl.append(_labeled("SEL FREQ", self.k_freq))
+        row2.append(_labeled("SEL FREQ", self.k_freq))
         self.k_q = Knob(0.3, 12.0, 1.41, step=0.1, default=1.41,
                         fmt=lambda v: f"Q{v:.1f}", on_change=self._on_q)
-        ctl.append(_labeled("SEL Q", self.k_q))
-
-        ctl.append(Gtk.Box(hexpand=True))
+        row2.append(_labeled("SEL Q", self.k_q))
 
         self.presets_btn = Gtk.MenuButton(label="PRESETS")
         self.presets_btn.add_css_class("eaa-button")
         self.presets_btn.set_popover(self._build_popover())
-        ctl.append(_labeled("EQ PRESETS", self.presets_btn))
+        row2.append(_labeled("EQ PRESETS", self.presets_btn))
 
         imp = make_button("IMPORT")
         imp.connect("clicked", self._on_import)
-        ctl.append(_labeled("APO/GEQ", imp))
+        row2.append(_labeled("APO / GEQ", imp))
         exp = Gtk.MenuButton(label="EXPORT")
         exp.add_css_class("eaa-button")
         exp.set_popover(self._build_export_popover())
-        ctl.append(_labeled(" ", exp))
+        row2.append(_labeled(" ", exp))
 
         reset = make_button("RESET")
         reset.connect("clicked", self._on_reset)
-        ctl.append(_labeled(" ", reset))
-        # scroll the controls horizontally if the window is narrow, so this
-        # wide row doesn't force a large minimum window width
-        ctl_scroll = Gtk.ScrolledWindow()
-        ctl_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        ctl_scroll.set_child(ctl)
-        self.append(ctl_scroll)
+        row2.append(_labeled(" ", reset))
+        self.append(ctl_wrap)
 
         self.refresh()
         self._on_select(0)   # point the FREQ/Q knobs at band 0 initially
