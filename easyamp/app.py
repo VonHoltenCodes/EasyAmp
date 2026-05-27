@@ -66,7 +66,8 @@ class Marquee:
 class EasyAmpWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="EasyAmp")
-        self.player = Player(on_tags=self._on_tags, on_eos=self._on_eos)
+        self.player = Player(on_tags=self._on_tags, on_eos=self._on_eos,
+                             on_error=self._on_play_error)
         self.playlist: list[str] = []
         self.track = -1
         self._playing = False
@@ -78,8 +79,8 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
         self.add_css_class("easyamp")
         self.set_resizable(True)
-        self.set_default_size(680, 470)
-        self.set_size_request(640, 440)
+        self.set_default_size(720, 560)        # ~4:3, taller than wide-ish
+        self.set_size_request(540, 430)        # modest floor so it stays fluid
 
         self.set_titlebar(window_title_bar("EASYAMP"))
 
@@ -387,6 +388,15 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
     def _on_eos(self):
         self.on_next(None)
+
+    def _on_play_error(self, message):
+        """A track failed to load/decode: stop and report, never auto-advance."""
+        self._playing = False
+        self.btn_play.icon.set_kind("play")
+        self._set_state("STOP")
+        self.marquee.set_text("LOAD ERROR")
+        if getattr(self, "eqview", None):
+            self.eqview.set_track("LOAD ERROR")
 
     def _on_tags(self, info):
         artist, title = info.get("artist", ""), info.get("title", "")

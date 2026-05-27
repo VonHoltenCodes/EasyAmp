@@ -165,7 +165,12 @@ class EQView(Gtk.Box):
         reset = make_button("RESET")
         reset.connect("clicked", self._on_reset)
         ctl.append(_labeled(" ", reset))
-        self.append(ctl)
+        # scroll the controls horizontally if the window is narrow, so this
+        # wide row doesn't force a large minimum window width
+        ctl_scroll = Gtk.ScrolledWindow()
+        ctl_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        ctl_scroll.set_child(ctl)
+        self.append(ctl_scroll)
 
         self.refresh()
         self._on_select(0)   # point the FREQ/Q knobs at band 0 initially

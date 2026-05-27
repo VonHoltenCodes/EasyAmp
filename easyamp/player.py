@@ -60,10 +60,11 @@ def _interp(x: float, xs: list[float], ys: list[float]) -> float:
 
 
 class Player:
-    def __init__(self, on_tags=None, on_eos=None, on_state=None):
+    def __init__(self, on_tags=None, on_eos=None, on_state=None, on_error=None):
         self.on_tags = on_tags
         self.on_eos = on_eos
         self.on_state = on_state
+        self.on_error = on_error
         self._uri: str | None = None
         self._bitrate = 0
         self._nbands = NBANDS
@@ -384,5 +385,9 @@ class Player:
 
     def _on_error(self, _bus, msg) -> None:
         err, _dbg = msg.parse_error()
-        if self.on_eos:
-            GLib.idle_add(self.on_eos)
+        # Halt the failed pipeline (also stops the bus re-emitting the error)
+        # and report it — do NOT treat an error as end-of-stream, or a bad/
+        # unreadable file would auto-advance and cascade down the playlist.
+        self.stop()
+        if self.on_error:
+            GLib.idle_add(self.on_error, err.message)

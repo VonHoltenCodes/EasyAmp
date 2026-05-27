@@ -35,6 +35,9 @@ class PlaylistPanel(Gtk.Box):
         scroller.add_css_class("eaa-playlist")
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        # single click only selects (so you can scroll/select freely);
+        # double-click (or Enter) plays — avoids hijacking playback on a tap
+        self.listbox.set_activate_on_single_click(False)
         self.listbox.connect("row-activated", self._on_row_activated)
         scroller.set_child(self.listbox)
         self.append(scroller)
