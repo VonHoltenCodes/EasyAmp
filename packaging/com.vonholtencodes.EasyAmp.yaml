@@ -6,6 +6,7 @@ command: easyamp
 
 finish-args:
   - --share=ipc
+  - --share=network               # in-app "update available" check (dl.easyampstereo.com/latest.json)
   - --socket=wayland
   - --socket=fallback-x11
   - --device=dri
