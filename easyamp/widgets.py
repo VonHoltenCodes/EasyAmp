@@ -318,8 +318,9 @@ class Knob(Gtk.DrawingArea):
         return self.value
 
     def _drag(self, g, dx, dy):
+        # horizontal: drag right raises, left lowers
         rng = self.vmax - self.vmin
-        self._apply(self._start - dy / 150.0 * rng)
+        self._apply(self._start + dx / 150.0 * rng)
 
     def _scroll(self, _c, _dx, dy):
         self._apply(self.value - dy * self.step)
@@ -336,9 +337,10 @@ class Knob(Gtk.DrawingArea):
         cr.arc(cx, cy, kr + 2, 0, 2 * math.pi)          # bezel
         cr.set_source_rgb(0.05, 0.05, 0.07)
         cr.fill()
-        grad = cairo.RadialGradient(cx - kr * 0.4, cy - kr * 0.4, kr * 0.1, cx, cy, kr)
-        grad.add_color_stop_rgb(0.0, 0.44, 0.44, 0.49)
-        grad.add_color_stop_rgb(1.0, 0.15, 0.15, 0.18)
+        grad = cairo.RadialGradient(cx - kr * 0.35, cy - kr * 0.35, kr * 0.05, cx, cy, kr)
+        grad.add_color_stop_rgb(0.0, 0.72, 0.72, 0.78)   # lighter brushed center
+        grad.add_color_stop_rgb(0.55, 0.42, 0.42, 0.47)
+        grad.add_color_stop_rgb(1.0, 0.16, 0.16, 0.19)   # dark rim
         cr.arc(cx, cy, kr, 0, 2 * math.pi)
         cr.set_source(grad)
         cr.fill()
