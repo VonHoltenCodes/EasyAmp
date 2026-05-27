@@ -257,3 +257,26 @@ window.easyamp {
 }
 .eaa-playlist row:selected .eaa-track { color: #ffffff; text-shadow: 0 0 5px rgba(150,180,255,0.7); }
 .eaa-track.current { color: #ffffff; }
+
+/* ===== status footer ===== */
+/* flat strip flush with the chassis; the inner label carries the status color */
+.eaa-footer {
+  background: #14141a;
+  background-image: none;
+  box-shadow: none;
+  border: none;
+  border-top: 1px solid #2c2c32;
+  padding: 2px 9px;
+  min-height: 0;
+}
+.eaa-footer:hover, .eaa-footer:active { background: #14141a; background-image: none; }
+.eaa-footer label {
+  color: #3f7a3f;                 /* dim green = running the current version */
+  font-family: "Pixelify Sans", monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+/* update available: amber status + a subtly lit strip, now actionable */
+.eaa-footer.update { background: #2a2410; border-top: 1px solid #5a4a14; }
+.eaa-footer.update:hover { background: #342c14; }
+.eaa-footer.update label { color: #f0c84a; text-shadow: 0 0 5px rgba(240,200,74,0.5); }

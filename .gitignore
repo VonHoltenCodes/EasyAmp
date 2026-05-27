@@ -22,3 +22,4 @@ _ostree-repo/
 easyamp.flatpakrepo
 easyamp.flatpakref
 publish-flatpak.sh
+latest.json

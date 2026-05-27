@@ -20,6 +20,8 @@ from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
 from .widgets import window_title_bar, make_button, set_led, SeekBar, StatusIndicator, TransportIcon  # noqa: E402
+from . import update_check  # noqa: E402
+from . import __version__  # noqa: E402
 
 APP_ID = "com.vonholtencodes.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
@@ -83,7 +85,17 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
         outer.add_css_class("eaa-chassis")
-        self.set_child(outer)
+        outer.set_vexpand(True)
+
+        # window = chassis + a thin status footer at the very bottom
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.append(outer)
+        root.append(self._build_footer())
+        self.set_child(root)
+
+        # Win/mac: flip the footer to an update notice if a newer build exists
+        # (no-op under Flatpak, which auto-updates from the software center).
+        update_check.check_async(self._on_update_available)
 
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         left.set_size_request(300, -1)
@@ -206,6 +218,31 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         s = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         s.add_css_class("eaa-xsep")
         return s
+
+    # ---- status footer ------------------------------------------------
+    def _build_footer(self):
+        """Thin status strip along the bottom: shows the running version in a
+        dim 'current' color; turns amber + clickable when a newer build is
+        available (Win/mac only — see update_check)."""
+        self._update_url = ""
+        self._footer = Gtk.Button()
+        self._footer.add_css_class("eaa-footer")
+        self._footer.set_can_focus(False)
+        self._footer_lbl = Gtk.Label(label=f"EASYAMP  v{__version__}", xalign=0)
+        self._footer.set_child(self._footer_lbl)
+        self._footer.connect("clicked", self._on_footer_clicked)
+        return self._footer
+
+    def _on_footer_clicked(self, _b):
+        if self._update_url:
+            import webbrowser
+            webbrowser.open(self._update_url)
+
+    def _on_update_available(self, version, url):
+        self._update_url = url
+        self._footer_lbl.set_text(f"EASYAMP  v{version} AVAILABLE  —  CLICK TO DOWNLOAD")
+        self._footer.add_css_class("update")
+        return False  # GLib.idle_add one-shot
 
     # ---- panel toggles ------------------------------------------------
     def on_toggle_eq(self, btn):
