@@ -44,6 +44,22 @@ def _band_freqs(n: int) -> list[float]:
     return [lo * (hi / lo) ** (i / (n - 1)) for i in range(n)]
 
 
+def _interp(x: float, xs: list[float], ys: list[float]) -> float:
+    """Linear interpolation of ys over xs (xs ascending), clamped at the ends."""
+    if not xs:
+        return 0.0
+    if x <= xs[0]:
+        return ys[0]
+    if x >= xs[-1]:
+        return ys[-1]
+    for i in range(1, len(xs)):
+        if x <= xs[i]:
+            d = xs[i] - xs[i - 1]
+            t = (x - xs[i - 1]) / d if d else 0.0
+            return ys[i - 1] + (ys[i] - ys[i - 1]) * t
+    return ys[-1]
+
+
 class Player:
     def __init__(self, on_tags=None, on_eos=None, on_state=None):
         self.on_tags = on_tags
@@ -207,18 +223,24 @@ class Player:
             band.set_property("type", b[3])
 
     def set_band_count(self, n: int) -> None:
-        """Change the number of EQ bands (10–32). Re-spaces frequencies and
-        zeroes gains. Safe to call while stopped; takes effect on next build
-        otherwise."""
+        """Change the number of EQ bands (10–32), **preserving the curve**: the
+        existing gains are resampled (log-frequency interpolation) onto the new
+        band frequencies rather than reset to flat."""
         n = max(MIN_BANDS, min(MAX_BANDS, int(n)))
         if n == self._nbands:
             return
+        old_f = [math.log10(b[0]) for b in self._bands]
+        old_g = [b[2] for b in self._bands]
         self._nbands = n
+        new_freqs = _band_freqs(n)
         try:
             self.eq.set_property("num-bands", n)
-            self._configure_bands(_band_freqs(n))
         except Exception:
             pass
+        self._configure_bands(new_freqs)            # sets freqs, gains -> 0
+        # re-apply the interpolated curve so settings carry over
+        for i, f in enumerate(new_freqs):
+            self.set_band(i, round(_interp(math.log10(f), old_f, old_g), 1))
 
     # ---- gains / pitch / balance -------------------------------------
     @staticmethod

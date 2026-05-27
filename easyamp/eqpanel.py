@@ -97,6 +97,14 @@ class EQPanel(Gtk.Box):
         self._name.set_text(name)
         self._push()
 
+    def apply_preset(self, preamp, bands):
+        """Apply a (preamp, 10-band) preset and push to the engine. Used by the
+        full EQ view so both EQ surfaces stay in sync. Presets are 10-band, so
+        ensure the engine is in 10-band mode first."""
+        self.player.set_band_count(10)
+        self.eq.set_values(preamp, bands)
+        self._push()
+
     def _on_save(self, _btn):
         name = self._name.get_text().strip() or "My EQ"
         eqpresets.save(name, self.eq.preamp, list(self.eq.bands))
