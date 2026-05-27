@@ -127,6 +127,22 @@ window.easyamp {
 }
 .eaa-button.on { color: #0a6a0a; }
 
+/* Gtk.MenuButton (the PRESETS dropdown) wraps its clickable in an inner
+   <button> node that still carries Adwaita's grey chrome on top of our
+   styling. Flatten that inner button so the .eaa-button look on the outer
+   menubutton shows through. Plain Gtk.Buttons have no inner button, so this
+   rule only affects the menu button. */
+.eaa-button > button {
+  background: none;
+  background-image: none;
+  box-shadow: none;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  min-width: 0;
+  color: inherit;
+}
+
 /* small square pixel LED */
 .eaa-led {
   min-width: 8px; min-height: 8px;
