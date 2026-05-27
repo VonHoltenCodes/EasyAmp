@@ -23,3 +23,7 @@ easyamp.flatpakrepo
 easyamp.flatpakref
 publish-flatpak.sh
 latest.json
+
+# EQ export outputs
+/easyamp-eq*.txt
+/easyamp-graphiceq*.txt

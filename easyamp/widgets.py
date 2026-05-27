@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import math
+
+import cairo
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -265,3 +269,102 @@ def window_title_bar(text: str) -> Gtk.WindowHandle:
     handle = Gtk.WindowHandle()
     handle.set_child(box)
     return handle
+
+
+class Knob(Gtk.DrawingArea):
+    """A rotary knob: metallic body with a red grab-dot that turns to set the
+    value, and a small green digital readout below. Drag up/down (or scroll)
+    to turn; double-click resets to the default."""
+
+    def __init__(self, vmin, vmax, value=0.0, step=0.5, default=None,
+                 fmt=None, on_change=None):
+        super().__init__()
+        self.vmin, self.vmax, self.step = float(vmin), float(vmax), float(step)
+        self.value = float(value)
+        self.default = float(default if default is not None else value)
+        self._fmt = fmt or (lambda v: f"{v:+.1f}")
+        self.on_change = on_change
+        self._start = self.value
+        self.set_content_width(54)
+        self.set_content_height(58)
+        self.set_draw_func(self._draw)
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", lambda *_: setattr(self, "_start", self.value))
+        drag.connect("drag-update", self._drag)
+        self.add_controller(drag)
+        scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        scroll.connect("scroll", self._scroll)
+        self.add_controller(scroll)
+        click = Gtk.GestureClick()
+        click.connect("pressed", self._click)
+        self.add_controller(click)
+
+    # ---- value ----
+    def _apply(self, v, notify=True):
+        v = max(self.vmin, min(self.vmax, v))
+        v = round(v / self.step) * self.step
+        if v != self.value:
+            self.value = v
+            self.queue_draw()
+            if notify and self.on_change:
+                self.on_change(v)
+        else:
+            self.queue_draw()
+
+    def set_value(self, v):
+        self._apply(v, notify=False)
+
+    def get_value(self):
+        return self.value
+
+    def _drag(self, g, dx, dy):
+        # horizontal: drag right raises, left lowers
+        rng = self.vmax - self.vmin
+        self._apply(self._start + dx / 150.0 * rng)
+
+    def _scroll(self, _c, _dx, dy):
+        self._apply(self.value - dy * self.step)
+        return True
+
+    def _click(self, g, n_press, x, y):
+        if n_press >= 2:
+            self._apply(self.default)
+
+    # ---- drawing ----
+    def _draw(self, _a, cr, w, h):
+        kr = min(w * 0.42, (h - 16) * 0.5)
+        cx, cy = w / 2, kr + 3
+        cr.arc(cx, cy, kr + 2, 0, 2 * math.pi)          # bezel
+        cr.set_source_rgb(0.05, 0.05, 0.07)
+        cr.fill()
+        grad = cairo.RadialGradient(cx - kr * 0.35, cy - kr * 0.35, kr * 0.05, cx, cy, kr)
+        grad.add_color_stop_rgb(0.0, 0.72, 0.72, 0.78)   # lighter brushed center
+        grad.add_color_stop_rgb(0.55, 0.42, 0.42, 0.47)
+        grad.add_color_stop_rgb(1.0, 0.16, 0.16, 0.19)   # dark rim
+        cr.arc(cx, cy, kr, 0, 2 * math.pi)
+        cr.set_source(grad)
+        cr.fill()
+        cr.arc(cx, cy, kr, 0, 2 * math.pi)
+        cr.set_line_width(1)
+        cr.set_source_rgb(0.55, 0.55, 0.60)
+        cr.stroke()
+        # red grab-dot at the value angle (225° sweep over the top to -45°)
+        t = (self.value - self.vmin) / (self.vmax - self.vmin) if self.vmax > self.vmin else 0
+        ang = math.radians(225 - 270 * t)
+        dx, dy = math.cos(ang), -math.sin(ang)
+        dotr = max(2.0, kr * 0.16)
+        cr.arc(cx + kr * 0.6 * dx, cy + kr * 0.6 * dy, dotr, 0, 2 * math.pi)
+        cr.set_source_rgb(0.95, 0.16, 0.12)
+        cr.fill()
+        cr.arc(cx + kr * 0.6 * dx, cy + kr * 0.6 * dy, dotr, 0, 2 * math.pi)
+        cr.set_line_width(0.6)
+        cr.set_source_rgb(0.3, 0.0, 0.0)
+        cr.stroke()
+        # green LCD readout
+        txt = self._fmt(self.value)
+        cr.select_font_face("monospace")
+        cr.set_font_size(9)
+        cr.set_source_rgb(0.16, 1.0, 0.16)
+        ext = cr.text_extents(txt)
+        cr.move_to(cx - ext.width / 2, h - 3)
+        cr.show_text(txt)

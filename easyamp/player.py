@@ -1,14 +1,20 @@
-"""GStreamer playback engine with a built-in 10-band EQ.
+"""GStreamer playback engine with a built-in parametric EQ + tone shaping.
 
-A `playbin` handles decoding of local files and network URIs (so anything
-GStreamer can read works, not just WAV). A 10-band graphic equalizer is
-inserted as playbin's `audio-filter`, giving a WinAmp-style EQ that affects
-EasyAmp's own playback. Output goes to the system sink, so it's also picked
-up by the system-wide spectrum capture like any other audio source.
+A ``playbin`` decodes local files and network URIs. Its ``audio-filter`` is a
+bin holding the processing chain:
+
+    in-gain → pitch (cassette varispeed) → parametric EQ (N bands) →
+    tone (bass/loudness shelves) → balance → out-gain
+
+The EQ is ``equalizer-nbands``: a configurable number (10–32) of fully
+parametric peaking/shelf bands (independent centre freq, Q, gain), so it can
+model Equalizer-APO style filter sets, not just fixed graphic sliders. Output
+goes to the system sink, so the system-wide spectrum capture still sees it.
 """
 
 from __future__ import annotations
 
+import math
 import os
 
 import gi
@@ -18,9 +24,40 @@ from gi.repository import Gst, GLib  # noqa: E402
 
 Gst.init(None)
 
-# equalizer-10bands centre frequencies (Hz), for UI labels
+# Default graphic-EQ centre frequencies (Hz) for a 10-band layout, matching the
+# classic look. Other band counts get log-spaced frequencies (see _band_freqs).
 EQ_FREQS = [29, 59, 119, 237, 474, 947, 1889, 3770, 7523, 15011]
 NBANDS = 10
+MIN_BANDS, MAX_BANDS = 10, 32
+DEFAULT_Q = 1.41           # ~2/3-octave, a sensible parametric default
+
+# equalizer-nbands band "type" enum
+BAND_PEAK, BAND_LOW_SHELF, BAND_HIGH_SHELF = 0, 1, 2
+
+
+def _band_freqs(n: int) -> list[float]:
+    """Centre frequencies for an n-band EQ (the classic set for 10, else
+    log-spaced 30 Hz … 16 kHz)."""
+    if n == 10:
+        return [float(f) for f in EQ_FREQS]
+    lo, hi = 30.0, 16000.0
+    return [lo * (hi / lo) ** (i / (n - 1)) for i in range(n)]
+
+
+def _interp(x: float, xs: list[float], ys: list[float]) -> float:
+    """Linear interpolation of ys over xs (xs ascending), clamped at the ends."""
+    if not xs:
+        return 0.0
+    if x <= xs[0]:
+        return ys[0]
+    if x >= xs[-1]:
+        return ys[-1]
+    for i in range(1, len(xs)):
+        if x <= xs[i]:
+            d = xs[i] - xs[i - 1]
+            t = (x - xs[i - 1]) / d if d else 0.0
+            return ys[i - 1] + (ys[i] - ys[i - 1]) * t
+    return ys[-1]
 
 
 class Player:
@@ -30,26 +67,12 @@ class Player:
         self.on_state = on_state
         self._uri: str | None = None
         self._bitrate = 0
+        self._nbands = NBANDS
+        # per-band parametric state: (freq, q, gain_db, type)
+        self._bands: list[list] = []
 
         self.playbin = Gst.ElementFactory.make("playbin", "easyamp-player")
-
-        # build the EQ filter bin: audioconvert -> equalizer-10bands
-        self.eq = Gst.ElementFactory.make("equalizer-10bands", "eq")
-        conv = Gst.ElementFactory.make("audioconvert", "eqconv")
-        # shelving stage for the Bass / Loudness tone toggles (low + high)
-        self.tone = Gst.ElementFactory.make("equalizer-3bands", "tone")
-        eqbin = Gst.Bin.new("eqbin")
-        eqbin.add(conv)
-        eqbin.add(self.eq)
-        conv.link(self.eq)
-        last = self.eq
-        if self.tone is not None:
-            eqbin.add(self.tone)
-            self.eq.link(self.tone)
-            last = self.tone
-        eqbin.add_pad(Gst.GhostPad.new("sink", conv.get_static_pad("sink")))
-        eqbin.add_pad(Gst.GhostPad.new("src", last.get_static_pad("src")))
-        self.playbin.set_property("audio-filter", eqbin)
+        self.playbin.set_property("audio-filter", self._build_eqbin())
 
         bus = self.playbin.get_bus()
         bus.add_signal_watch()
@@ -57,12 +80,70 @@ class Player:
         bus.connect("message::eos", self._on_eos)
         bus.connect("message::error", self._on_error)
 
+    # ---- pipeline construction ---------------------------------------
+    def _build_eqbin(self) -> Gst.Bin:
+        """Build the processing chain bin. Called once; band count changes
+        reconfigure the existing equalizer rather than rebuilding."""
+        conv = Gst.ElementFactory.make("audioconvert", "eqconv")
+        self.in_gain = Gst.ElementFactory.make("volume", "ingain")
+        self.pitch = Gst.ElementFactory.make("pitch", "pitch")   # may be None
+        self.eq = Gst.ElementFactory.make("equalizer-nbands", "eq")
+        self.tone = Gst.ElementFactory.make("equalizer-3bands", "tone")
+        self.balance = Gst.ElementFactory.make("audiopanorama", "balance")
+        self.out_gain = Gst.ElementFactory.make("volume", "outgain")
+        conv2 = Gst.ElementFactory.make("audioconvert", "eqconv2")
+
+        self.eq.set_property("num-bands", self._nbands)
+        self._configure_bands(_band_freqs(self._nbands))
+
+        eqbin = Gst.Bin.new("eqbin")
+        chain = [conv, self.in_gain]
+        if self.pitch is not None:
+            chain.append(self.pitch)
+        chain += [self.eq]
+        if self.tone is not None:
+            chain.append(self.tone)
+        if self.balance is not None:
+            chain.append(self.balance)
+        chain += [self.out_gain, conv2]
+
+        for el in chain:
+            eqbin.add(el)
+        for a, b in zip(chain, chain[1:]):
+            a.link(b)
+
+        eqbin.add_pad(Gst.GhostPad.new("sink", chain[0].get_static_pad("sink")))
+        eqbin.add_pad(Gst.GhostPad.new("src", chain[-1].get_static_pad("src")))
+        return eqbin
+
+    def _band(self, i: int):
+        """The GstChildProxy band object at index i (or None)."""
+        try:
+            return self.eq.get_child_by_index(i)
+        except Exception:
+            return None
+
+    def _configure_bands(self, freqs: list[float], q: float = DEFAULT_Q) -> None:
+        """Set each band's freq/bandwidth/type from a frequency list, keeping
+        gains at 0. End bands become shelves; the rest are peaking."""
+        self._bands = []
+        n = len(freqs)
+        for i, f in enumerate(freqs):
+            btype = (BAND_LOW_SHELF if i == 0 else
+                     BAND_HIGH_SHELF if i == n - 1 else BAND_PEAK)
+            bw = f / q                      # bandwidth (Hz) = freq / Q
+            band = self._band(i)
+            if band is not None:
+                band.set_property("freq", float(f))
+                band.set_property("bandwidth", float(bw))
+                band.set_property("type", btype)
+                band.set_property("gain", 0.0)
+            self._bands.append([float(f), float(q), 0.0, btype])
+
     # ---- transport ----------------------------------------------------
     def load(self, path_or_uri: str) -> None:
-        if "://" in path_or_uri:
-            uri = path_or_uri
-        else:
-            uri = Gst.filename_to_uri(os.path.abspath(path_or_uri))
+        uri = path_or_uri if "://" in path_or_uri else \
+            Gst.filename_to_uri(os.path.abspath(path_or_uri))
         self.stop()
         self._uri = uri
         self.playbin.set_property("uri", uri)
@@ -100,22 +181,123 @@ class Player:
                 int(frac * dur),
             )
 
-    # ---- equalizer ----------------------------------------------------
+    # ---- equalizer: graphic-compatible API ---------------------------
     def set_band(self, index: int, gain_db: float) -> None:
-        if 0 <= index < NBANDS:
-            self.eq.set_property(f"band{index}", float(gain_db))
+        """Set a band's gain only (used by the classic graphic sliders)."""
+        band = self._band(index)
+        if band is not None:
+            band.set_property("gain", float(gain_db))
+        if 0 <= index < len(self._bands):
+            self._bands[index][2] = float(gain_db)
 
     def reset_eq(self) -> None:
-        for i in range(NBANDS):
+        for i in range(self._nbands):
             self.set_band(i, 0.0)
 
+    def reset_bands(self) -> None:
+        """Full reset: restore default freqs + Q and zero gains for the current
+        band count (used by the EQ view's RESET)."""
+        self._configure_bands(_band_freqs(self._nbands))
+
+    # ---- equalizer: parametric API -----------------------------------
+    def band_count(self) -> int:
+        return self._nbands
+
+    def get_bands(self) -> list[list]:
+        """List of [freq, q, gain_db, type] for the current bands."""
+        return [list(b) for b in self._bands]
+
+    def set_band_param(self, index: int, freq=None, q=None,
+                       gain=None, btype=None) -> None:
+        if not (0 <= index < len(self._bands)):
+            return
+        b = self._bands[index]
+        if freq is not None:
+            b[0] = float(freq)
+        if q is not None:
+            b[1] = float(q)
+        if gain is not None:
+            b[2] = float(gain)
+        if btype is not None:
+            b[3] = int(btype)
+        band = self._band(index)
+        if band is not None:
+            band.set_property("freq", b[0])
+            band.set_property("bandwidth", b[0] / max(b[1], 0.05))
+            band.set_property("gain", b[2])
+            band.set_property("type", b[3])
+
+    def load_bands(self, bands, preamp=None) -> None:
+        """Replace the whole EQ from an imported set of (freq, q, gain, type)
+        tuples. Band count is set to len(bands) (clamped 10–32)."""
+        n = max(MIN_BANDS, min(MAX_BANDS, len(bands)))
+        self._nbands = n
+        try:
+            self.eq.set_property("num-bands", n)
+        except Exception:
+            pass
+        self._configure_bands(_band_freqs(n))   # placeholder, overridden below
+        for i in range(n):
+            if i < len(bands):
+                f, q, g, t = bands[i]
+                self.set_band_param(i, freq=f, q=q, gain=g, btype=t)
+            else:
+                self.set_band(i, 0.0)
+        if preamp is not None:
+            self.set_preamp(float(preamp))
+
+    def set_band_count(self, n: int) -> None:
+        """Change the number of EQ bands (10–32), **preserving the curve**: the
+        existing gains are resampled (log-frequency interpolation) onto the new
+        band frequencies rather than reset to flat."""
+        n = max(MIN_BANDS, min(MAX_BANDS, int(n)))
+        if n == self._nbands:
+            return
+        old_f = [math.log10(b[0]) for b in self._bands]
+        old_g = [b[2] for b in self._bands]
+        self._nbands = n
+        new_freqs = _band_freqs(n)
+        try:
+            self.eq.set_property("num-bands", n)
+        except Exception:
+            pass
+        self._configure_bands(new_freqs)            # sets freqs, gains -> 0
+        # re-apply the interpolated curve so settings carry over
+        for i, f in enumerate(new_freqs):
+            self.set_band(i, round(_interp(math.log10(f), old_f, old_g), 1))
+
+    # ---- gains / pitch / balance -------------------------------------
+    @staticmethod
+    def _db_to_lin(db: float) -> float:
+        return float(10.0 ** (db / 20.0))
+
     def set_preamp(self, gain_db: float) -> None:
-        """Preamp doubles as playback volume (dB -> linear)."""
-        self.playbin.set_property("volume", float(10.0 ** (gain_db / 20.0)))
+        """Master preamp == playbin volume."""
+        self.playbin.set_property("volume", self._db_to_lin(gain_db))
+
+    def set_in_gain(self, gain_db: float) -> None:
+        if self.in_gain is not None:
+            self.in_gain.set_property("volume", self._db_to_lin(gain_db))
+
+    def set_out_gain(self, gain_db: float) -> None:
+        if self.out_gain is not None:
+            self.out_gain.set_property("volume", self._db_to_lin(gain_db))
+
+    def set_pitch(self, rate: float) -> None:
+        """Cassette-deck varispeed: rate>1 = faster + higher, <1 = slower +
+        lower (pitch and tempo move together). No-op if SoundTouch is absent."""
+        if self.pitch is not None:
+            self.pitch.set_property("rate", float(rate))
+
+    def has_pitch(self) -> bool:
+        return self.pitch is not None
+
+    def set_balance(self, pos: float) -> None:
+        """-1.0 = full left, 0 = centre, +1.0 = full right."""
+        if self.balance is not None:
+            self.balance.set_property("panorama", max(-1.0, min(1.0, float(pos))))
 
     def set_tone(self, bass: bool, loudness: bool) -> None:
-        """Bass enhances the low shelf; Loudness boosts low + high (a
-        loudness contour). Both are additive on the low band."""
         if self.tone is None:
             return
         low = (6.0 if bass else 0.0) + (4.0 if loudness else 0.0)
@@ -126,7 +308,6 @@ class Player:
 
     # ---- pipeline / stream info --------------------------------------
     def stream_info(self) -> dict:
-        """Current audio format: rate (Hz), channels, bitrate (bps)."""
         info = {"rate": 0, "channels": 0, "bitrate": self._bitrate}
         try:
             pad = self.playbin.emit("get-audio-pad", 0)
@@ -169,6 +350,5 @@ class Player:
 
     def _on_error(self, _bus, msg) -> None:
         err, _dbg = msg.parse_error()
-        # surface as an EOS-like signal so the UI can advance/clear
         if self.on_eos:
             GLib.idle_add(self.on_eos)
