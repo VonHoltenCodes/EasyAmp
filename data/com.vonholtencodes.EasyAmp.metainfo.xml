@@ -42,6 +42,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.5" date="2026-05-27">
+      <description>
+        <p>Add LED-style left/right level meters to the equalizer view, and
+        tidy the control panel into a row of knobs and a row of buttons.</p>
+      </description>
+    </release>
     <release version="0.4.4" date="2026-05-27">
       <description>
         <p>Stability fix: resolves a freeze that could occur when changing
