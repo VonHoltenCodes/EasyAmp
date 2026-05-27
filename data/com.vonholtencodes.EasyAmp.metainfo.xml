@@ -42,6 +42,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.3.5" date="2026-05-26">
+      <description>
+        <p>Add a status footer that shows the running version and flags when a
+        newer build is available (Windows/macOS).</p>
+      </description>
+    </release>
     <release version="0.3.4" date="2026-05-26">
       <description>
         <p>Fix a grey overlay on the Presets button under the Flatpak theme.</p>
