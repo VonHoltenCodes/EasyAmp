@@ -8,19 +8,24 @@ presets menu shared with the small player EQ.
 
 from __future__ import annotations
 
+import math
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Pango  # noqa: E402
 
 from . import eqpresets  # noqa: E402
-from .eqbank import EQBank  # noqa: E402
+from .eqbank import EQBank, _fmt_freq  # noqa: E402
 from .widgets import Knob, make_button  # noqa: E402
 
 
 def _labeled(label_text, widget):
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
     box.add_css_class("eaa-ctl")
+    box.set_halign(Gtk.Align.CENTER)
+    box.set_margin_start(8)
+    box.set_margin_end(8)
     lbl = Gtk.Label(label=label_text)
     lbl.add_css_class("eaa-ctl-lbl")
     box.append(lbl)
@@ -68,8 +73,10 @@ class EQView(Gtk.Box):
         self.append(frame)
 
         # ---- knob controls row ----
-        ctl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        ctl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         ctl.add_css_class("eaa-panel")
+        ctl.set_margin_top(4)
+        ctl.set_margin_bottom(4)
 
         self.k_bands = Knob(10, 32, p.band_count(), step=1, default=10,
                             fmt=lambda v: f"{int(v)}", on_change=self._on_bands)
@@ -91,6 +98,16 @@ class EQView(Gtk.Box):
         self.k_pitch.set_sensitive(p.has_pitch())
         ctl.append(_labeled("PITCH" if p.has_pitch() else "PITCH n/a", self.k_pitch))
 
+        # selected-band parametric controls (freq is log-scaled)
+        self._selected = 0
+        self.k_freq = Knob(math.log10(20), math.log10(20000), math.log10(1000),
+                           step=0.02, default=math.log10(1000),
+                           fmt=lambda v: _fmt_freq(10 ** v), on_change=self._on_freq)
+        ctl.append(_labeled("SEL FREQ", self.k_freq))
+        self.k_q = Knob(0.3, 12.0, 1.41, step=0.1, default=1.41,
+                        fmt=lambda v: f"Q{v:.1f}", on_change=self._on_q)
+        ctl.append(_labeled("SEL Q", self.k_q))
+
         ctl.append(Gtk.Box(hexpand=True))
 
         self.presets_btn = Gtk.MenuButton(label="PRESETS")
@@ -104,6 +121,7 @@ class EQView(Gtk.Box):
         self.append(ctl)
 
         self.refresh()
+        self._on_select(0)   # point the FREQ/Q knobs at band 0 initially
 
     # ---- presets ----
     def _build_popover(self):
@@ -170,7 +188,22 @@ class EQView(Gtk.Box):
         self.win.player.set_band(index, gain)
 
     def _on_select(self, index):
+        """A band was clicked: point the FREQ/Q knobs at it."""
         self._selected = index
+        bands = self.win.player.get_bands()
+        if 0 <= index < len(bands):
+            f, q, _g, _t = bands[index]
+            self.k_freq.set_value(math.log10(max(f, 1.0)))
+            self.k_q.set_value(q)
+
+    def _on_freq(self, v):
+        if getattr(self, "_selected", -1) >= 0:
+            self.win.player.set_band_param(self._selected, freq=10 ** v)
+            self.refresh()
+
+    def _on_q(self, v):
+        if getattr(self, "_selected", -1) >= 0:
+            self.win.player.set_band_param(self._selected, q=v)
 
     def _on_bands(self, v):
         n = int(v)
