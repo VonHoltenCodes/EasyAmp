@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -63,6 +65,24 @@ class EQView(Gtk.Box):
         self.m_track.set_ellipsize(Pango.EllipsizeMode.END)
         mini.append(self.m_track)
         self.append(mini)
+
+        # ---- meters: log-scale spectrum + waveform scope ----
+        self._levels = np.zeros(1, dtype=np.float32)
+        self._wave = np.zeros(1, dtype=np.float32)
+        meters = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+        self.spec = Gtk.DrawingArea()
+        self.spec.add_css_class("eaa-viz")
+        self.spec.set_content_height(66)
+        self.spec.set_hexpand(True)
+        self.spec.set_draw_func(self._draw_spectrum)
+        meters.append(self.spec)
+        self.wave = Gtk.DrawingArea()
+        self.wave.add_css_class("eaa-viz")
+        self.wave.set_content_height(66)
+        self.wave.set_size_request(200, -1)
+        self.wave.set_draw_func(self._draw_wave)
+        meters.append(self.wave)
+        self.append(meters)
 
         # ---- the expanded EQ bank ----
         self.bank = EQBank(on_change=self._on_band, on_select=self._on_select)
@@ -220,6 +240,56 @@ class EQView(Gtk.Box):
         self.win.player.set_balance(0); self.win.player.set_pitch(1.0)
         self.win.player.set_preamp(0)
         self.refresh()
+
+    # ---- meters (fed from the window's capture) ----
+    def set_audio(self, levels, wave):
+        self._levels = levels
+        self._wave = wave
+        self.spec.queue_draw()
+        self.wave.queue_draw()
+
+    def _draw_spectrum(self, _a, cr, w, h):
+        cr.set_source_rgb(0, 0, 0)
+        cr.paint()
+        n = len(self._levels)
+        if n < 2 or w <= 0:
+            return
+        # log-frequency tick lines (bands are already log-spaced 40Hz..24kHz)
+        cr.select_font_face("monospace")
+        cr.set_font_size(7)
+        lo, hi = 40.0, 24000.0
+        span = math.log10(hi / lo)
+        for f, lab in ((100, "100"), (1000, "1K"), (10000, "10K")):
+            x = (math.log10(f / lo) / span) * w
+            cr.set_source_rgba(0.3, 0.45, 0.7, 0.35)
+            cr.set_line_width(1)
+            cr.move_to(x, 0); cr.line_to(x, h - 9); cr.stroke()
+            cr.set_source_rgb(0.4, 0.55, 0.8)
+            cr.move_to(x + 2, h - 1); cr.show_text(lab)
+        # bars
+        bw = w / n
+        for i, lv in enumerate(self._levels):
+            bh = max(1.0, float(lv) * (h - 10))
+            warm = min(1.0, float(lv) * 1.3)
+            cr.set_source_rgb(0.12 + 0.8 * warm, 0.9 - 0.5 * warm, 0.12)
+            cr.rectangle(i * bw + 0.5, (h - 10) - bh, max(1.0, bw - 1), bh)
+            cr.fill()
+
+    def _draw_wave(self, _a, cr, w, h):
+        cr.set_source_rgb(0, 0, 0)
+        cr.paint()
+        wv = self._wave
+        n = len(wv)
+        if n < 2 or w <= 0:
+            return
+        mid = h / 2
+        cr.set_source_rgb(0.10, 0.95, 0.14)
+        cr.set_line_width(1.4)
+        for i in range(n):
+            x = i / (n - 1) * w
+            y = mid - float(wv[i]) * (h * 0.45)
+            cr.line_to(x, y) if i else cr.move_to(x, y)
+        cr.stroke()
 
     # ---- mini-player sync (called by the window) ----
     def set_time(self, text):
