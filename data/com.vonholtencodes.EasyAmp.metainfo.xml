@@ -42,6 +42,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.1" date="2026-05-27">
+      <description>
+        <p>Add independent left/right EQ: a SPLIT toggle in the equalizer view
+        lets you tune each channel separately (linked stereo by default).</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-05-27">
       <description>
         <p>Major equalizer update: a full-window parametric EQ (10–32 bands with
