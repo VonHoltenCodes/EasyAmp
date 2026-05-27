@@ -16,3 +16,8 @@ repo/
 
 # local-only submission notes (not for the repo)
 packaging/README-flathub.md
+
+# local flatpak repo build output (rsynced to server, never committed)
+_ostree-repo/
+easyamp.flatpakrepo
+easyamp.flatpakref
