@@ -83,7 +83,13 @@ class Player:
     def _build_eqbin(self) -> Gst.Bin:
         conv = Gst.ElementFactory.make("audioconvert", "eqconv")
         self.in_gain = Gst.ElementFactory.make("volume", "ingain")
-        self.pitch = Gst.ElementFactory.make("pitch", "pitch")        # may be None
+        # cassette varispeed: prefer SoundTouch 'pitch' (Windows), else the
+        # dependency-free 'speed' resampler (in the GNOME runtime + brew bad).
+        self.pitch = Gst.ElementFactory.make("pitch", "pitch")
+        self._pitch_prop = "rate"
+        if self.pitch is None:
+            self.pitch = Gst.ElementFactory.make("speed", "speed")
+            self._pitch_prop = "speed"
         conv_s = Gst.ElementFactory.make("audioconvert", "eqconv_s")
         capsf = Gst.ElementFactory.make("capsfilter", "eqcaps")
         capsf.set_property("caps", Gst.Caps.from_string("audio/x-raw,channels=2"))
@@ -316,7 +322,7 @@ class Player:
 
     def set_pitch(self, rate: float) -> None:
         if self.pitch is not None:
-            self.pitch.set_property("rate", float(rate))
+            self.pitch.set_property(self._pitch_prop, float(rate))
 
     def has_pitch(self) -> bool:
         return self.pitch is not None
