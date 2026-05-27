@@ -368,3 +368,71 @@ class Knob(Gtk.DrawingArea):
         ext = cr.text_extents(txt)
         cr.move_to(cx - ext.width / 2, h - 3)
         cr.show_text(txt)
+
+
+class LedMeter(Gtk.DrawingArea):
+    """Horizontal LED-segment dB meters for left/right (EasyEffects style):
+    a row of segments per channel that light green→yellow→red up to the
+    current level, with a peak-hold tick and a dB readout. Fed normalized
+    0..1 levels (≈ -50..0 dB)."""
+
+    def __init__(self):
+        super().__init__()
+        self.l = self.r = 0.0
+        self.pl = self.pr = 0.0          # peak hold
+        self.set_content_height(40)
+        self.set_hexpand(True)
+        self.set_draw_func(self._draw)
+
+    def set_levels(self, l, r):
+        self.l = max(0.0, min(1.0, float(l)))
+        self.r = max(0.0, min(1.0, float(r)))
+        self.pl = max(self.l, self.pl - 0.012)
+        self.pr = max(self.r, self.pr - 0.012)
+        self.queue_draw()
+
+    @staticmethod
+    def _seg_color(frac):
+        g, y, r = (0.12, 0.85, 0.22), (0.92, 0.82, 0.12), (0.94, 0.16, 0.10)
+        if frac < 0.6:
+            t = frac / 0.6
+            return tuple(g[i] + (y[i] - g[i]) * t for i in range(3))
+        t = (frac - 0.6) / 0.4
+        return tuple(y[i] + (r[i] - y[i]) * t for i in range(3))
+
+    def _bar(self, cr, x0, y, w, h, level, peak):
+        seg, gap = 4.0, 2.0
+        n = max(1, int(w // (seg + gap)))
+        for i in range(n):
+            frac = i / (n - 1) if n > 1 else 0.0
+            col = self._seg_color(frac)
+            if frac > level:
+                col = tuple(c * 0.16 for c in col)     # unlit = dim
+            cr.set_source_rgb(*col)
+            cr.rectangle(x0 + i * (seg + gap), y, seg, h)
+            cr.fill()
+        if peak > 0.01:                                # peak-hold tick
+            pi = min(n - 1, int(peak * (n - 1)))
+            cr.set_source_rgb(*self._seg_color(pi / (n - 1) if n > 1 else 0))
+            cr.rectangle(x0 + pi * (seg + gap), y - 1, seg, h + 2)
+            cr.fill()
+
+    def _draw(self, _a, cr, w, h):
+        cr.set_source_rgb(0, 0, 0)
+        cr.paint()
+        cr.select_font_face("monospace")
+        cr.set_font_size(9)
+        lbl_w, db_w = 12.0, 30.0
+        bar_w = w - lbl_w - db_w - 4
+        bh = (h - 9) / 2
+        for idx, (lab, lvl, pk) in enumerate((("L", self.l, self.pl),
+                                              ("R", self.r, self.pr))):
+            y = 2 + idx * (bh + 4)
+            cr.set_source_rgb(0.45, 0.6, 0.85)
+            cr.move_to(1, y + bh - 1)
+            cr.show_text(lab)
+            self._bar(cr, lbl_w, y, bar_w, bh, lvl, pk)
+            db = lvl * 50.0 - 50.0
+            cr.set_source_rgb(0.5, 0.85, 0.55)
+            cr.move_to(lbl_w + bar_w + 5, y + bh - 1)
+            cr.show_text(f"{db:+.0f}")

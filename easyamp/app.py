@@ -447,7 +447,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.viz.queue_draw()
         self.scope.queue_draw()
         if getattr(self, "eqview", None):
-            self.eqview.set_audio(levels, wave)
+            self.eqview.set_audio(levels, vu, wave)
         return False
 
     def _draw_scope(self, _a, cr, w, h):

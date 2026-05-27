@@ -19,7 +19,7 @@ from gi.repository import Gtk, Pango  # noqa: E402
 
 from . import eqpresets, eqio  # noqa: E402
 from .eqbank import EQBank, _fmt_freq  # noqa: E402
-from .widgets import Knob, make_button  # noqa: E402
+from .widgets import Knob, make_button, LedMeter  # noqa: E402
 
 
 def _labeled(label_text, widget):
@@ -101,6 +101,9 @@ class EQView(Gtk.Box):
         row1.set_halign(Gtk.Align.CENTER)
         row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         row2.set_halign(Gtk.Align.CENTER)
+        # LED-segment L/R dB meters across the top of the control panel
+        self.led = LedMeter()
+        ctl_wrap.append(self.led)
         ctl_wrap.append(row1)
         ctl_wrap.append(row2)
 
@@ -125,16 +128,17 @@ class EQView(Gtk.Box):
         self.k_pitch.set_sensitive(p.has_pitch())
         row1.append(_labeled("PITCH" if p.has_pitch() else "PITCH n/a", self.k_pitch))
 
-        # row 2: selected-band parametric controls + presets / import / export
+        # row 1 (cont.): selected-band parametric knobs
         self._selected = 0
         self.k_freq = Knob(math.log10(20), math.log10(20000), math.log10(1000),
                            step=0.02, default=math.log10(1000),
                            fmt=lambda v: _fmt_freq(10 ** v), on_change=self._on_freq)
-        row2.append(_labeled("SEL FREQ", self.k_freq))
+        row1.append(_labeled("SEL FREQ", self.k_freq))
         self.k_q = Knob(0.3, 12.0, 1.41, step=0.1, default=1.41,
                         fmt=lambda v: f"Q{v:.1f}", on_change=self._on_q)
-        row2.append(_labeled("SEL Q", self.k_q))
+        row1.append(_labeled("SEL Q", self.k_q))
 
+        # row 2: buttons
         self.presets_btn = Gtk.MenuButton(label="PRESETS")
         self.presets_btn.add_css_class("eaa-button")
         self.presets_btn.set_popover(self._build_popover())
@@ -315,9 +319,10 @@ class EQView(Gtk.Box):
         self._on_select(self._selected)        # re-sync SEL FREQ/Q knobs
 
     # ---- meters (fed from the window's capture) ----
-    def set_audio(self, levels, wave):
+    def set_audio(self, levels, vu, wave):
         self._levels = levels
         self._wave = wave
+        self.led.set_levels(vu[0], vu[1])
         self.spec.queue_draw()
         self.wave.queue_draw()
 
