@@ -42,6 +42,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.0" date="2026-05-27">
+      <description>
+        <p>Major equalizer update: a full-window parametric EQ (10–32 bands with
+        per-band frequency/Q), reachable from a new Player/Equalizer tab, with
+        knob controls for gains, pitch and balance, a spectrum + waveform
+        display, and Equalizer-APO / GraphicEQ import &amp; export.</p>
+      </description>
+    </release>
     <release version="0.3.5" date="2026-05-26">
       <description>
         <p>Add a status footer that shows the running version and flags when a
