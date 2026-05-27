@@ -87,9 +87,15 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         outer.add_css_class("eaa-chassis")
         outer.set_vexpand(True)
 
-        # window = chassis + a thin status footer at the very bottom
+        # two views (player / equalizer) swapped by the footer tabs; the
+        # equalizer page is added at the end of __init__ once the player exists
+        self.stack = Gtk.Stack()
+        self.stack.set_vexpand(True)
+        self.stack.add_named(outer, "player")
+
+        # window = view stack + a thin status/tab footer at the very bottom
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        root.append(outer)
+        root.append(self.stack)
         root.append(self._build_footer())
         self.set_child(root)
 
@@ -199,6 +205,11 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.connect("close-request", self._on_close)
         self._pos_src = GLib.timeout_add(250, self._tick_position)
 
+        # full-window equalizer view (second stack page; tabs in the footer)
+        from .eqview import EQView
+        self.eqview = EQView(self)
+        self.stack.add_named(self.eqview, "equalizer")
+
     # ---- tiny builders ------------------------------------------------
     @staticmethod
     def _mk(widget, *classes):
@@ -221,17 +232,39 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
     # ---- status footer ------------------------------------------------
     def _build_footer(self):
-        """Thin status strip along the bottom: shows the running version in a
-        dim 'current' color; turns amber + clickable when a newer build is
-        available (Win/mac only — see update_check)."""
+        """Bottom strip: PLAYER / EQUALIZER view tabs on the left, and a status
+        label on the right showing the running version (dim 'current' green;
+        amber + clickable when a newer build is available — Win/mac only)."""
         self._update_url = ""
-        self._footer = Gtk.Button()
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        bar.add_css_class("eaa-footerbar")
+
+        self.tab_player = Gtk.ToggleButton(label="PLAYER")
+        self.tab_eq = Gtk.ToggleButton(label="EQUALIZER")
+        self.tab_eq.set_group(self.tab_player)
+        self.tab_player.set_active(True)
+        for t, name in ((self.tab_player, "player"), (self.tab_eq, "equalizer")):
+            t.add_css_class("eaa-tab")
+            t.set_can_focus(False)
+            t.connect("toggled", self._on_tab, name)
+            bar.append(t)
+
+        bar.append(Gtk.Box(hexpand=True))   # spacer
+
+        self._footer = Gtk.Button()         # status (version / update notice)
         self._footer.add_css_class("eaa-footer")
         self._footer.set_can_focus(False)
-        self._footer_lbl = Gtk.Label(label=f"EASYAMP  v{__version__}", xalign=0)
+        self._footer_lbl = Gtk.Label(label=f"EASYAMP  v{__version__}", xalign=1)
         self._footer.set_child(self._footer_lbl)
         self._footer.connect("clicked", self._on_footer_clicked)
-        return self._footer
+        bar.append(self._footer)
+        return bar
+
+    def _on_tab(self, btn, name):
+        if btn.get_active():
+            self.stack.set_visible_child_name(name)
+            if name == "equalizer" and getattr(self, "eqview", None):
+                self.eqview.refresh()
 
     def _on_footer_clicked(self, _b):
         if self._update_url:
@@ -316,7 +349,10 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self._playing = True
         self._set_state("PLAY")
         self.btn_play.icon.set_kind("pause")
-        self.marquee.set_text(os.path.splitext(os.path.basename(path))[0])
+        track_name = os.path.splitext(os.path.basename(path))[0]
+        self.marquee.set_text(track_name)
+        if getattr(self, "eqview", None):
+            self.eqview.set_track(track_name)
         self.playlist_panel.set_current(idx)
 
     def on_playpause(self, _b):
@@ -355,13 +391,18 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
     def _on_tags(self, info):
         artist, title = info.get("artist", ""), info.get("title", "")
         if title:
-            self.marquee.set_text(f"{artist} - {title}" if artist else title)
+            text = f"{artist} - {title}" if artist else title
+            self.marquee.set_text(text)
+            if getattr(self, "eqview", None):
+                self.eqview.set_track(text)
 
     def _set_state(self, state):
         self.ind_state.set_text(state)
         (self.ind_state.add_css_class if state == "PLAY"
          else self.ind_state.remove_css_class)("on")
         self.status.set_state(state.lower())
+        if getattr(self, "eqview", None):
+            self.eqview.set_state(state)
 
     def _do_seek(self, frac):
         if self.track >= 0:
@@ -373,6 +414,8 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             if dur > 0:
                 self.seek.set_fraction(pos / dur)
             self.lcd_time.set_text(_fmt(pos))
+            if getattr(self, "eqview", None):
+                self.eqview.set_time(_fmt(pos))
             si = self.player.stream_info()
             self.ind_khz.set_text(f"{round(si['rate']/1000)}K" if si["rate"] else "--K")
             self.ind_kbps.set_text(f"{round(si['bitrate']/1000)}K" if si["bitrate"] else "--K")
