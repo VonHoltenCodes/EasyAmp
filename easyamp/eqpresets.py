@@ -25,6 +25,7 @@ USER_DIR = os.path.join(
 # name -> 10 band gains (dB). Preamp defaults to 0.
 BUILTIN: dict[str, list[float]] = {
     "Flat":      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "EasyAmp":   [0, 4, 8, 3, 3, 3, 1, 4, 4, 8],   # the house curve
     "Rock":      [5, 4, 2, 0, -1, 0, 2, 3, 4, 4],
     "Pop":       [-1, 1, 3, 4, 4, 2, 0, -1, -1, -2],
     "Jazz":      [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
