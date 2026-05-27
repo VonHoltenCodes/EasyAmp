@@ -42,6 +42,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.3.4" date="2026-05-26">
+      <description>
+        <p>Fix a grey overlay on the Presets button under the Flatpak theme.</p>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-05-25">
       <description>
         <p>Native Windows build (installer + portable), with WASAPI-loopback
