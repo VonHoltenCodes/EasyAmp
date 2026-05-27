@@ -70,6 +70,8 @@ class Player:
         self._nbands = NBANDS
         self._bands_l: list[list] = []
         self._bands_r: list[list] = []
+        self._gen = 0               # bumped per load(); guards stale errors
+        self._error_reported = False
 
         self.playbin = Gst.ElementFactory.make("playbin", "easyamp-player")
         self.playbin.set_property("audio-filter", self._build_eqbin())
@@ -177,6 +179,8 @@ class Player:
         uri = path_or_uri if "://" in path_or_uri else \
             Gst.filename_to_uri(os.path.abspath(path_or_uri))
         self.stop()
+        self._gen += 1
+        self._error_reported = False
         self._uri = uri
         self.playbin.set_property("uri", uri)
 
@@ -187,6 +191,10 @@ class Player:
         self.playbin.set_state(Gst.State.PAUSED)
 
     def stop(self) -> None:
+        # Step down through READY rather than slamming PLAYING->NULL: the
+        # deinterleave/interleave split pipeline can deadlock joining its
+        # streaming threads on a direct ->NULL transition.
+        self.playbin.set_state(Gst.State.READY)
         self.playbin.set_state(Gst.State.NULL)
 
     def is_playing(self) -> bool:
@@ -385,9 +393,17 @@ class Player:
 
     def _on_error(self, _bus, msg) -> None:
         err, _dbg = msg.parse_error()
-        # Halt the failed pipeline (also stops the bus re-emitting the error)
-        # and report it — do NOT treat an error as end-of-stream, or a bad/
-        # unreadable file would auto-advance and cascade down the playlist.
+        # Defer handling onto the main loop: calling set_state(NULL) directly
+        # inside a bus callback deadlocks (it joins the streaming threads from
+        # within their own message dispatch). Reporting the error here (not
+        # as EOS) also avoids the auto-advance cascade down the playlist.
+        GLib.idle_add(self._handle_error, err.message, self._gen)
+
+    def _handle_error(self, message: str, gen: int) -> bool:
+        if gen != self._gen or self._error_reported:
+            return False        # stale error from a previous track, or already reported
+        self._error_reported = True
         self.stop()
         if self.on_error:
-            GLib.idle_add(self.on_error, err.message)
+            self.on_error(message)
+        return False
