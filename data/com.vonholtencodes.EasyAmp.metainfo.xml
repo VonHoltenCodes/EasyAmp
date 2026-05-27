@@ -42,6 +42,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.7" date="2026-05-27">
+      <description>
+        <p>Maintenance release — verifies the cross-platform update badge and
+        self-update flow end to end.</p>
+      </description>
+    </release>
     <release version="0.4.6" date="2026-05-27">
       <description>
         <p>The "update available" badge now appears on every platform
