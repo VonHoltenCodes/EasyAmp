@@ -19,8 +19,7 @@ from gi.repository import Gtk, Pango  # noqa: E402
 
 from . import eqpresets, eqio  # noqa: E402
 from .eqbank import EQBank, _fmt_freq  # noqa: E402
-from .player import STEREO, LEFT, RIGHT  # noqa: E402
-from .widgets import Knob, make_button, set_led  # noqa: E402
+from .widgets import Knob, make_button  # noqa: E402
 
 
 def _labeled(label_text, widget):
@@ -105,24 +104,7 @@ class EQView(Gtk.Box):
         ctl_wrap.append(row1)
         ctl_wrap.append(row2)
 
-        # row 1: channel + output knobs
-        self._channel = STEREO
-        ch_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        self.btn_split = make_button("SPLIT", toggle=True, led=True)
-        self.btn_split.connect("toggled", self._on_split)
-        ch_box.append(self.btn_split)
-        self.btn_l = make_button("L", toggle=True)
-        self.btn_r = make_button("R", toggle=True)
-        self.btn_r.set_group(self.btn_l)
-        self.btn_l.set_active(True)
-        self.btn_l.set_sensitive(False)
-        self.btn_r.set_sensitive(False)
-        self.btn_l.connect("toggled", lambda b: b.get_active() and self._on_chan(LEFT))
-        self.btn_r.connect("toggled", lambda b: b.get_active() and self._on_chan(RIGHT))
-        ch_box.append(self.btn_l)
-        ch_box.append(self.btn_r)
-        row1.append(_labeled("CHANNEL", ch_box))
-
+        # row 1: output knobs
         self.k_bands = Knob(10, 32, p.band_count(), step=1, default=10,
                             fmt=lambda v: f"{int(v)}", on_change=self._on_bands)
         row1.append(_labeled("BANDS", self.k_bands))
@@ -291,38 +273,16 @@ class EQView(Gtk.Box):
 
     # ---- band bank ----
     def refresh(self):
-        bands = self.win.player.get_bands(self._view_channel())
+        bands = self.win.player.get_bands()
         self.bank.set_bands([b[0] for b in bands], [b[2] for b in bands])
 
-    def _view_channel(self):
-        """Which channel's bands the bank shows/edits."""
-        return RIGHT if self._channel == RIGHT else LEFT
-
-    def _on_split(self, btn):
-        split = btn.get_active()
-        set_led(btn, split)
-        self.btn_l.set_sensitive(split)
-        self.btn_r.set_sensitive(split)
-        if split:
-            self.btn_l.set_active(True)
-            self._channel = LEFT
-        else:
-            self._channel = STEREO
-        self.refresh()
-        self._on_select(getattr(self, "_selected", 0))
-
-    def _on_chan(self, channel):
-        self._channel = channel
-        self.refresh()
-        self._on_select(getattr(self, "_selected", 0))
-
     def _on_band(self, index, gain):
-        self.win.player.set_band(index, gain, channel=self._channel)
+        self.win.player.set_band(index, gain)
 
     def _on_select(self, index):
-        """A band was clicked: point the FREQ/Q knobs at it (active channel)."""
+        """A band was clicked: point the FREQ/Q knobs at it."""
         self._selected = index
-        bands = self.win.player.get_bands(self._view_channel())
+        bands = self.win.player.get_bands()
         if 0 <= index < len(bands):
             f, q, _g, _t = bands[index]
             self.k_freq.set_value(math.log10(max(f, 1.0)))
@@ -330,12 +290,12 @@ class EQView(Gtk.Box):
 
     def _on_freq(self, v):
         if getattr(self, "_selected", -1) >= 0:
-            self.win.player.set_band_param(self._selected, freq=10 ** v, channel=self._channel)
+            self.win.player.set_band_param(self._selected, freq=10 ** v)
             self.refresh()
 
     def _on_q(self, v):
         if getattr(self, "_selected", -1) >= 0:
-            self.win.player.set_band_param(self._selected, q=v, channel=self._channel)
+            self.win.player.set_band_param(self._selected, q=v)
 
     def _on_bands(self, v):
         n = int(v)

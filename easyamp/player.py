@@ -3,15 +3,14 @@
 A ``playbin`` decodes local files and network URIs. Its ``audio-filter`` is a
 bin holding the processing chain:
 
-    in-gain → pitch (cassette varispeed) → [deinterleave → EQ-L / EQ-R →
-    interleave] → tone (bass/loudness) → balance → out-gain
+    in-gain → pitch (cassette varispeed) → equalizer-nbands → tone
+    (bass/loudness) → balance → out-gain
 
-The signal is split to two independent ``equalizer-nbands`` (one per channel)
-so the EQ can run **linked** (stereo, both channels identical) or **split**
-(left/right edited independently). Each EQ is N fully-parametric bands
-(10–32, independent centre freq, Q, gain), so it can model Equalizer-APO
-style filter sets. Output goes to the system sink, so the system-wide
-spectrum capture still sees it.
+The EQ is a single ``equalizer-nbands`` of N fully-parametric bands (10–32,
+independent centre freq, Q, gain), so it can model Equalizer-APO style filter
+sets. Output goes to the system sink, so the system-wide spectrum capture
+still sees it. (A per-channel deinterleave/interleave variant was tried but
+deadlocked on state changes — froze on track change — so the EQ is stereo.)
 """
 
 from __future__ import annotations
@@ -68,8 +67,7 @@ class Player:
         self._uri: str | None = None
         self._bitrate = 0
         self._nbands = NBANDS
-        self._bands_l: list[list] = []
-        self._bands_r: list[list] = []
+        self._bands: list[list] = []
         self._gen = 0               # bumped per load(); guards stale errors
         self._error_reported = False
 
@@ -84,6 +82,10 @@ class Player:
 
     # ---- pipeline construction ---------------------------------------
     def _build_eqbin(self) -> Gst.Bin:
+        """Single-EQ chain: in-gain -> pitch -> equalizer-nbands -> tone ->
+        balance -> out-gain. (A per-channel deinterleave/interleave variant
+        was tried but its pipeline deadlocked on state changes — froze on
+        track change — so the EQ is a single stereo equalizer-nbands.)"""
         conv = Gst.ElementFactory.make("audioconvert", "eqconv")
         self.in_gain = Gst.ElementFactory.make("volume", "ingain")
         # cassette varispeed: prefer SoundTouch 'pitch' (Windows), else the
@@ -93,86 +95,55 @@ class Player:
         if self.pitch is None:
             self.pitch = Gst.ElementFactory.make("speed", "speed")
             self._pitch_prop = "speed"
-        conv_s = Gst.ElementFactory.make("audioconvert", "eqconv_s")
-        capsf = Gst.ElementFactory.make("capsfilter", "eqcaps")
-        capsf.set_property("caps", Gst.Caps.from_string("audio/x-raw,channels=2"))
-        self.deint = Gst.ElementFactory.make("deinterleave", "deint")
-        self.q_l = Gst.ElementFactory.make("queue", "q_l")   # decouple the two
-        self.q_r = Gst.ElementFactory.make("queue", "q_r")   # branches (no deadlock)
-        self.eq_l = Gst.ElementFactory.make("equalizer-nbands", "eq_l")
-        self.eq_r = Gst.ElementFactory.make("equalizer-nbands", "eq_r")
-        self.inter = Gst.ElementFactory.make("interleave", "inter")
-        conv_mid = Gst.ElementFactory.make("audioconvert", "eqconv_mid")
+        self.eq = Gst.ElementFactory.make("equalizer-nbands", "eq")
         self.tone = Gst.ElementFactory.make("equalizer-3bands", "tone")
         self.balance = Gst.ElementFactory.make("audiopanorama", "balance")
         self.out_gain = Gst.ElementFactory.make("volume", "outgain")
         conv2 = Gst.ElementFactory.make("audioconvert", "eqconv2")
 
-        for eq in (self.eq_l, self.eq_r):
-            eq.set_property("num-bands", self._nbands)
+        self.eq.set_property("num-bands", self._nbands)
         self._configure_bands(_band_freqs(self._nbands))
 
         eqbin = Gst.Bin.new("eqbin")
-        head = [conv, self.in_gain]
+        chain = [conv, self.in_gain]
         if self.pitch is not None:
-            head.append(self.pitch)
-        head += [conv_s, capsf, self.deint]
-        tail = [self.inter, conv_mid]
+            chain.append(self.pitch)
+        chain.append(self.eq)
         if self.tone is not None:
-            tail.append(self.tone)
+            chain.append(self.tone)
         if self.balance is not None:
-            tail.append(self.balance)
-        tail += [self.out_gain, conv2]
+            chain.append(self.balance)
+        chain += [self.out_gain, conv2]
 
-        for el in head + [self.q_l, self.q_r, self.eq_l, self.eq_r] + tail:
+        for el in chain:
             eqbin.add(el)
-        for a, b in zip(head, head[1:]):
+        for a, b in zip(chain, chain[1:]):
             a.link(b)
-        for a, b in zip(tail, tail[1:]):
-            a.link(b)
-        self.q_l.link(self.eq_l)
-        self.q_r.link(self.eq_r)
 
-        # EQ-L/EQ-R -> interleave (request sink pads, order = channel order)
-        for eq in (self.eq_l, self.eq_r):
-            sink = self.inter.request_pad_simple("sink_%u")
-            eq.get_static_pad("src").link(sink)
-        # deinterleave creates its src pads at runtime -> the decoupling queues
-        self.deint.connect("pad-added", self._on_deint_pad)
-
-        eqbin.add_pad(Gst.GhostPad.new("sink", conv.get_static_pad("sink")))
-        eqbin.add_pad(Gst.GhostPad.new("src", conv2.get_static_pad("src")))
+        eqbin.add_pad(Gst.GhostPad.new("sink", chain[0].get_static_pad("sink")))
+        eqbin.add_pad(Gst.GhostPad.new("src", chain[-1].get_static_pad("src")))
         return eqbin
 
-    def _on_deint_pad(self, _deint, pad):
-        name = pad.get_name()       # src_0 (L), src_1 (R)
-        target = self.q_l if name.endswith("0") else self.q_r
-        sink = target.get_static_pad("sink")
-        if not sink.is_linked():
-            pad.link(sink)
-
-    def _band_obj(self, eq, i):
+    def _band_obj(self, i):
         try:
-            return eq.get_child_by_index(i)
+            return self.eq.get_child_by_index(i)
         except Exception:
             return None
 
     def _configure_bands(self, freqs, q: float = DEFAULT_Q) -> None:
-        self._bands_l, self._bands_r = [], []
+        self._bands = []
         n = len(freqs)
         for i, f in enumerate(freqs):
             btype = (BAND_LOW_SHELF if i == 0 else
                      BAND_HIGH_SHELF if i == n - 1 else BAND_PEAK)
             bw = f / q
-            for eq in (self.eq_l, self.eq_r):
-                b = self._band_obj(eq, i)
-                if b is not None:
-                    b.set_property("freq", float(f))
-                    b.set_property("bandwidth", float(bw))
-                    b.set_property("type", btype)
-                    b.set_property("gain", 0.0)
-            self._bands_l.append([float(f), float(q), 0.0, btype])
-            self._bands_r.append([float(f), float(q), 0.0, btype])
+            b = self._band_obj(i)
+            if b is not None:
+                b.set_property("freq", float(f))
+                b.set_property("bandwidth", float(bw))
+                b.set_property("type", btype)
+                b.set_property("gain", 0.0)
+            self._bands.append([float(f), float(q), 0.0, btype])
 
     # ---- transport ----------------------------------------------------
     def load(self, path_or_uri: str) -> None:
@@ -191,10 +162,6 @@ class Player:
         self.playbin.set_state(Gst.State.PAUSED)
 
     def stop(self) -> None:
-        # Step down through READY rather than slamming PLAYING->NULL: the
-        # deinterleave/interleave split pipeline can deadlock joining its
-        # streaming threads on a direct ->NULL transition.
-        self.playbin.set_state(Gst.State.READY)
         self.playbin.set_state(Gst.State.NULL)
 
     def is_playing(self) -> bool:
@@ -221,27 +188,19 @@ class Player:
                 int(frac * dur),
             )
 
-    # ---- channels -----------------------------------------------------
-    def _eqs_bands(self, channel):
-        """(eq, band-list) pairs an edit on `channel` should touch."""
-        if channel == LEFT:
-            return [(self.eq_l, self._bands_l)]
-        if channel == RIGHT:
-            return [(self.eq_r, self._bands_r)]
-        return [(self.eq_l, self._bands_l), (self.eq_r, self._bands_r)]
-
     # ---- equalizer: gain (graphic-compatible) ------------------------
+    # `channel` is accepted for call-site compatibility but ignored — the EQ
+    # is a single stereo bank (per-channel split was removed; it deadlocked).
     def set_band(self, index: int, gain_db: float, channel=STEREO) -> None:
-        for eq, bands in self._eqs_bands(channel):
-            b = self._band_obj(eq, index)
-            if b is not None:
-                b.set_property("gain", float(gain_db))
-            if 0 <= index < len(bands):
-                bands[index][2] = float(gain_db)
+        b = self._band_obj(index)
+        if b is not None:
+            b.set_property("gain", float(gain_db))
+        if 0 <= index < len(self._bands):
+            self._bands[index][2] = float(gain_db)
 
     def reset_eq(self) -> None:
         for i in range(self._nbands):
-            self.set_band(i, 0.0, STEREO)
+            self.set_band(i, 0.0)
 
     def reset_bands(self) -> None:
         self._configure_bands(_band_freqs(self._nbands))
@@ -250,66 +209,59 @@ class Player:
     def band_count(self) -> int:
         return self._nbands
 
-    def get_bands(self, channel=LEFT) -> list[list]:
-        src = self._bands_r if channel == RIGHT else self._bands_l
-        return [list(b) for b in src]
+    def get_bands(self, channel=STEREO) -> list[list]:
+        return [list(b) for b in self._bands]
 
     def set_band_param(self, index, freq=None, q=None, gain=None,
                        btype=None, channel=STEREO) -> None:
-        for eq, bands in self._eqs_bands(channel):
-            if not (0 <= index < len(bands)):
-                continue
-            b = bands[index]
-            if freq is not None:
-                b[0] = float(freq)
-            if q is not None:
-                b[1] = float(q)
-            if gain is not None:
-                b[2] = float(gain)
-            if btype is not None:
-                b[3] = int(btype)
-            obj = self._band_obj(eq, index)
-            if obj is not None:
-                obj.set_property("freq", b[0])
-                obj.set_property("bandwidth", b[0] / max(b[1], 0.05))
-                obj.set_property("gain", b[2])
-                obj.set_property("type", b[3])
+        if not (0 <= index < len(self._bands)):
+            return
+        b = self._bands[index]
+        if freq is not None:
+            b[0] = float(freq)
+        if q is not None:
+            b[1] = float(q)
+        if gain is not None:
+            b[2] = float(gain)
+        if btype is not None:
+            b[3] = int(btype)
+        obj = self._band_obj(index)
+        if obj is not None:
+            obj.set_property("freq", b[0])
+            obj.set_property("bandwidth", b[0] / max(b[1], 0.05))
+            obj.set_property("gain", b[2])
+            obj.set_property("type", b[3])
 
     def set_band_count(self, n: int) -> None:
-        """Change band count (10–32), preserving each channel's curve via
-        log-frequency interpolation."""
+        """Change band count (10–32), preserving the curve via log-frequency
+        interpolation."""
         n = max(MIN_BANDS, min(MAX_BANDS, int(n)))
         if n == self._nbands:
             return
-        old_f = [math.log10(b[0]) for b in self._bands_l]
-        old_gl = [b[2] for b in self._bands_l]
-        old_gr = [b[2] for b in self._bands_r]
+        old_f = [math.log10(b[0]) for b in self._bands]
+        old_g = [b[2] for b in self._bands]
         self._nbands = n
         new_freqs = _band_freqs(n)
-        for eq in (self.eq_l, self.eq_r):
-            try:
-                eq.set_property("num-bands", n)
-            except Exception:
-                pass
+        try:
+            self.eq.set_property("num-bands", n)
+        except Exception:
+            pass
         self._configure_bands(new_freqs)
         for i, f in enumerate(new_freqs):
-            lf = math.log10(f)
-            self.set_band(i, round(_interp(lf, old_f, old_gl), 1), LEFT)
-            self.set_band(i, round(_interp(lf, old_f, old_gr), 1), RIGHT)
+            self.set_band(i, round(_interp(math.log10(f), old_f, old_g), 1))
 
     def load_bands(self, bands, preamp=None, channel=STEREO) -> None:
         n = max(MIN_BANDS, min(MAX_BANDS, len(bands)))
         self._nbands = n
-        for eq in (self.eq_l, self.eq_r):
-            try:
-                eq.set_property("num-bands", n)
-            except Exception:
-                pass
+        try:
+            self.eq.set_property("num-bands", n)
+        except Exception:
+            pass
         self._configure_bands(_band_freqs(n))
         for i in range(n):
             if i < len(bands):
                 f, q, g, t = bands[i]
-                self.set_band_param(i, freq=f, q=q, gain=g, btype=t, channel=channel)
+                self.set_band_param(i, freq=f, q=q, gain=g, btype=t)
         if preamp is not None:
             self.set_preamp(float(preamp))
 
