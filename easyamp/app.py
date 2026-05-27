@@ -268,13 +268,19 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
                 self.eqview.refresh()
 
     def _on_footer_clicked(self, _b):
-        if self._update_url:
+        if not self._update_url:
+            return
+        # Gtk.show_uri is portal-aware, so the link opens correctly inside the
+        # Flatpak sandbox too (falls back to webbrowser if unavailable).
+        try:
+            Gtk.show_uri(self, self._update_url, Gdk.CURRENT_TIME)
+        except Exception:
             import webbrowser
             webbrowser.open(self._update_url)
 
     def _on_update_available(self, version, url):
         self._update_url = url
-        self._footer_lbl.set_text(f"EASYAMP  v{version} AVAILABLE  —  CLICK TO DOWNLOAD")
+        self._footer_lbl.set_text(f"EASYAMP  v{version} AVAILABLE  —  CLICK TO UPDATE")
         self._footer.add_css_class("update")
         return False  # GLib.idle_add one-shot
 

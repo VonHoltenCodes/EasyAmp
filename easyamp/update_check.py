@@ -1,18 +1,16 @@
-"""Lightweight 'new version available' check for the standalone builds.
+"""Lightweight 'new version available' check (all platforms).
 
-Windows and macOS have no package manager to update EasyAmp, so on launch the
-app fetches a small JSON from the project server, compares it to the running
-version, and — if newer — reveals a dismissible banner with a download link.
-
-Skipped entirely under Flatpak, where the software center / ``flatpak update``
-already handle updates. Fully best-effort: any network or parse error is
-swallowed silently (no popups, no logs in the user's face).
+On launch the app fetches a small JSON from the project server, compares it
+to the running version, and — if newer — lights the bottom-right footer badge
+amber with a link to the update page. The update page has per-OS instructions
+(installer download for Windows/macOS; `flatpak update` / one-click for
+Linux), so the same flow works everywhere. Fully best-effort: any network or
+parse error is swallowed silently (no popups, no logs in the user's face).
 """
 
 from __future__ import annotations
 
 import json
-import os
 import threading
 import urllib.request
 
@@ -22,10 +20,6 @@ from . import __version__
 
 LATEST_URL = "https://dl.easyampstereo.com/latest.json"
 _TIMEOUT = 6  # seconds
-
-
-def _running_in_flatpak() -> bool:
-    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
 
 
 def _parse(v: str) -> tuple[int, ...]:
@@ -47,10 +41,8 @@ def is_newer(remote: str, local: str) -> bool:
 
 
 def check_async(on_update) -> None:
-    """If a newer version is published, call ``on_update(version, download_url)``
-    on the GLib main loop. Never raises; a no-op under Flatpak."""
-    if _running_in_flatpak():
-        return
+    """If a newer version is published, call ``on_update(version, update_url)``
+    on the GLib main loop. Runs on every platform; never raises."""
 
     def worker() -> None:
         try:
