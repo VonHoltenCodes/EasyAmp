@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Pango  # noqa: E402
 
-from . import eqpresets  # noqa: E402
+from . import eqpresets, eqio  # noqa: E402
 from .eqbank import EQBank, _fmt_freq  # noqa: E402
 from .widgets import Knob, make_button  # noqa: E402
 
@@ -135,6 +135,14 @@ class EQView(Gtk.Box):
         self.presets_btn.set_popover(self._build_popover())
         ctl.append(_labeled("EQ PRESETS", self.presets_btn))
 
+        imp = make_button("IMPORT")
+        imp.connect("clicked", self._on_import)
+        ctl.append(_labeled("APO/GEQ", imp))
+        exp = Gtk.MenuButton(label="EXPORT")
+        exp.add_css_class("eaa-button")
+        exp.set_popover(self._build_export_popover())
+        ctl.append(_labeled(" ", exp))
+
         reset = make_button("RESET")
         reset.connect("clicked", self._on_reset)
         ctl.append(_labeled(" ", reset))
@@ -198,6 +206,65 @@ class EQView(Gtk.Box):
         panel = self.win.eq_panel
         eqpresets.save(name, panel.eq.preamp, list(panel.eq.bands))
         self._reload_presets()
+
+    # ---- import / export (Equalizer APO + AutoEQ GraphicEQ) ----
+    def _build_export_popover(self):
+        pop = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{m}")(6)
+        for label, kind in (("Equalizer APO config", "apo"),
+                            ("AutoEQ GraphicEQ", "geq")):
+            b = make_button(label)
+            b.connect("clicked", lambda _b, k=kind: (pop.popdown(), self._export(k)))
+            box.append(b)
+        pop.set_child(box)
+        return pop
+
+    def _on_import(self, _b):
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Import EQ — APO config or GraphicEQ")
+        dlg.open(self.win, None, self._import_done)
+
+    def _import_done(self, dlg, res):
+        try:
+            f = dlg.open_finish(res)
+        except Exception:
+            return
+        try:
+            with open(f.get_path(), encoding="utf-8", errors="ignore") as fh:
+                parsed = eqio.parse(fh.read())
+        except OSError:
+            return
+        if not parsed:
+            return
+        preamp, bands = parsed
+        self.win.player.load_bands(eqio.downsample(bands, 32), preamp)
+        self.k_bands.set_value(self.win.player.band_count())
+        self.k_preamp.set_value(preamp)
+        self.refresh()
+        self._on_select(0)
+
+    def _export(self, kind):
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Export EQ")
+        dlg.set_initial_name("easyamp-eq.txt" if kind == "apo"
+                             else "easyamp-graphiceq.txt")
+        dlg.save(self.win, None, lambda d, r: self._export_done(d, r, kind))
+
+    def _export_done(self, dlg, res, kind):
+        try:
+            f = dlg.save_finish(res)
+        except Exception:
+            return
+        bands = self.win.player.get_bands()
+        text = (eqio.format_apo(self.k_preamp.get_value(), bands) if kind == "apo"
+                else eqio.format_graphiceq(bands))
+        try:
+            with open(f.get_path(), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        except OSError:
+            pass
 
     # ---- band bank ----
     def refresh(self):

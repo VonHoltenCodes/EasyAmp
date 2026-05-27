@@ -227,6 +227,25 @@ class Player:
             band.set_property("gain", b[2])
             band.set_property("type", b[3])
 
+    def load_bands(self, bands, preamp=None) -> None:
+        """Replace the whole EQ from an imported set of (freq, q, gain, type)
+        tuples. Band count is set to len(bands) (clamped 10–32)."""
+        n = max(MIN_BANDS, min(MAX_BANDS, len(bands)))
+        self._nbands = n
+        try:
+            self.eq.set_property("num-bands", n)
+        except Exception:
+            pass
+        self._configure_bands(_band_freqs(n))   # placeholder, overridden below
+        for i in range(n):
+            if i < len(bands):
+                f, q, g, t = bands[i]
+                self.set_band_param(i, freq=f, q=q, gain=g, btype=t)
+            else:
+                self.set_band(i, 0.0)
+        if preamp is not None:
+            self.set_preamp(float(preamp))
+
     def set_band_count(self, n: int) -> None:
         """Change the number of EQ bands (10–32), **preserving the curve**: the
         existing gains are resampled (log-frequency interpolation) onto the new
