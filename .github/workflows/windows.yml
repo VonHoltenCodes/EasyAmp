@@ -31,6 +31,7 @@ jobs:
             mingw-w64-x86_64-gst-plugins-base
             mingw-w64-x86_64-gst-plugins-good
             mingw-w64-x86_64-gst-plugins-bad
+            mingw-w64-x86_64-soundtouch
             mingw-w64-x86_64-adwaita-icon-theme
             mingw-w64-x86_64-hicolor-icon-theme
             mingw-w64-x86_64-librsvg
@@ -67,6 +68,7 @@ jobs:
           echo "schemas: $(ls -1 "$DEST/share/glib-2.0/schemas/")"
           echo "Gtk typelib present in bundle: $(ls packaging/windows/dist/EasyAmp/_internal/gi_typelibs/ | grep -i gtk || echo MISSING)"
           echo "libgtk dll present: $(find packaging/windows/dist/EasyAmp -iname 'libgtk-4*' | head -1 || echo MISSING)"
+          echo "soundtouch (pitch) plugin: $(find packaging/windows/dist/EasyAmp -iname '*soundtouch*' | head -1 || echo MISSING)"
 
       - name: Package the portable .zip
         shell: pwsh
