@@ -12,6 +12,13 @@ jobs:
   build:
     name: Build Windows .exe installer + zip
     runs-on: windows-latest
+    # The 'release' environment binds this job's OIDC token subject to
+    # `repo:VonHoltenCodes/EasyAmp:environment:release`, which is what the
+    # Azure Trusted Signing federated credential is configured to trust.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write             # required for federated OIDC → Azure login
     defaults:
       run:
         shell: msys2 {0}
@@ -70,6 +77,27 @@ jobs:
           echo "libgtk dll present: $(find packaging/windows/dist/EasyAmp -iname 'libgtk-4*' | head -1 || echo MISSING)"
           echo "soundtouch (pitch) plugin: $(find packaging/windows/dist/EasyAmp -iname '*soundtouch*' | head -1 || echo MISSING)"
 
+      # Sign EasyAmp.exe BEFORE zipping so the portable archive contains the
+      # signed binary. Azure login uses GitHub OIDC; no client secret stored.
+      - name: Azure login (OIDC for Trusted Signing)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign portable EasyAmp.exe (Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          endpoint: https://cus.codesigning.azure.net/
+          trusted-signing-account-name: easyamp-signing
+          certificate-profile-name: easyamp-public-trust
+          files-folder: ${{ github.workspace }}/packaging/windows/dist/EasyAmp
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com/
+          timestamp-digest: SHA256
+
       - name: Package the portable .zip
         shell: pwsh
         run: |
@@ -84,6 +112,18 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
           & $iscc "/DAppVersion=$ver" packaging\windows\EasyAmp.iss
           Copy-Item packaging\windows\EasyAmp-Setup-x64.exe .\EasyAmp-Setup-x64.exe
+
+      - name: Sign installer EasyAmp-Setup-x64.exe (Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          endpoint: https://cus.codesigning.azure.net/
+          trusted-signing-account-name: easyamp-signing
+          certificate-profile-name: easyamp-public-trust
+          files-folder: ${{ github.workspace }}
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com/
+          timestamp-digest: SHA256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
