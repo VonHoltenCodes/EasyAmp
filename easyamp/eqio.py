@@ -14,8 +14,7 @@ from __future__ import annotations
 
 import re
 
-DEFAULT_Q = 1.41
-PEAK, LOW_SHELF, HIGH_SHELF = 0, 1, 2
+from .eqmodel import DEFAULT_Q, PEAK, LOW_SHELF, HIGH_SHELF
 
 _APO_TYPE = {
     "PK": PEAK, "PEQ": PEAK, "MODAL": PEAK,

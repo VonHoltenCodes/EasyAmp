@@ -42,6 +42,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.0" date="2026-07-01">
+      <description>
+        <p>Full internal refactor: cleaner module structure with no
+        user-facing behaviour changes, paving the way for future features.</p>
+      </description>
+    </release>
     <release version="0.4.10" date="2026-05-30">
       <description>
         <p>The Windows installer and portable .exe are now code-signed via

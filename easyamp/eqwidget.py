@@ -9,45 +9,19 @@ A small dB scale (+20 / +0 / -20) sits between the preamp and the bands.
 
 from __future__ import annotations
 
-import cairo
-
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
-NBANDS = 10
+from .eqmodel import GRAPHIC_NBANDS as NBANDS  # noqa: E402
+from .eqmodel import BAND_MIN, BAND_MAX, PRE_MIN, PRE_MAX  # noqa: E402
+from .paint import paint_smoke, paint_thumb, value_color  # noqa: E402
+
 BAND_LABELS = ["60", "170", "310", "600", "1K", "3K", "6K", "12K", "14K", "16K"]
-BAND_MIN, BAND_MAX = -24.0, 12.0
-PRE_MIN, PRE_MAX = -12.0, 12.0
 
 CURVE_H = 30
 LABEL_H = 14
-
-
-def paint_smoke(cr, w, h):
-    cr.set_source_rgb(0, 0, 0)
-    cr.paint()
-    g = cairo.RadialGradient(w, h, 0, w, h, max(w, h) * 1.15)
-    g.add_color_stop_rgb(0.0, 0.11, 0.18, 0.40)
-    g.add_color_stop_rgb(0.45, 0.05, 0.09, 0.20)
-    g.add_color_stop_rgb(1.0, 0.0, 0.0, 0.0)
-    cr.set_source(g)
-    cr.paint()
-
-
-def _lerp(a, b, t):
-    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
-
-
-def _vcolor(v, vmin, vmax):
-    yellow, orange, red, green = ((0.92, 0.82, 0.14), (0.93, 0.52, 0.10),
-                                  (0.90, 0.13, 0.10), (0.16, 0.82, 0.18))
-    if v >= 0:
-        f = min(v / vmax, 1.0) if vmax else 0.0
-        return _lerp(yellow, orange, f / 0.5) if f < 0.5 else _lerp(orange, red, (f - 0.5) / 0.5)
-    f = min(v / vmin, 1.0) if vmin else 0.0
-    return _lerp(yellow, green, f)
 
 
 class EQWidget(Gtk.DrawingArea):
@@ -136,7 +110,7 @@ class EQWidget(Gtk.DrawingArea):
         for i in range(NBANDS):
             cx = band_x0 + (i + 0.5) * band_w
             cy = 3 + (BAND_MAX - self.bands[i]) / (BAND_MAX - BAND_MIN) * (CURVE_H - 6)
-            pts.append((cx, cy, _vcolor(self.bands[i], BAND_MIN, BAND_MAX)))
+            pts.append((cx, cy, value_color(self.bands[i], BAND_MIN, BAND_MAX)))
         cr.set_line_width(2)
         for i in range(len(pts) - 1):
             x1, y1, c1 = pts[i]
@@ -156,7 +130,7 @@ class EQWidget(Gtk.DrawingArea):
             cols.append((band_x0 + (i + 0.5) * band_w, self.bands[i],
                          BAND_MIN, BAND_MAX, BAND_LABELS[i]))
         for cx, v, vmin, vmax, label in cols:
-            color = _vcolor(v, vmin, vmax)
+            color = value_color(v, vmin, vmax)
             cr.set_source_rgb(*color)
             cr.rectangle(cx - 3.5, top, 7, span)
             cr.fill()
@@ -166,30 +140,7 @@ class EQWidget(Gtk.DrawingArea):
             cr.stroke()
 
             tw = min(band_w - 5, 18)
-            th = tw * 0.55
-            ty = y_of(v, vmin, vmax) - th / 2
-            tx = cx - tw / 2
-            cr.set_source_rgb(0.80, 0.80, 0.84)
-            cr.rectangle(tx, ty, tw, th)
-            cr.fill()
-            cr.set_source_rgb(0.94, 0.94, 0.98)
-            cr.set_line_width(1)
-            cr.move_to(tx, ty + th)
-            cr.line_to(tx, ty)
-            cr.line_to(tx + tw, ty)
-            cr.stroke()
-            cr.set_source_rgb(0.30, 0.30, 0.34)
-            cr.move_to(tx + tw, ty)
-            cr.line_to(tx + tw, ty + th)
-            cr.line_to(tx, ty + th)
-            cr.stroke()
-            cr.set_source_rgb(0.22, 0.22, 0.26)
-            cr.set_line_width(1.2)
-            midy = ty + th / 2
-            for off in (-1.8, 1.8):
-                cr.move_to(cx - 4, midy + off)
-                cr.line_to(cx + 4, midy + off)
-            cr.stroke()
+            paint_thumb(cr, cx, y_of(v, vmin, vmax), tw, tw * 0.55)
 
             cr.set_source_rgb(0.42, 0.58, 0.85)
             cr.set_font_size(9)

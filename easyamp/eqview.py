@@ -10,16 +10,17 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Pango  # noqa: E402
 
 from . import eqpresets, eqio  # noqa: E402
-from .eqbank import EQBank, _fmt_freq  # noqa: E402
-from .widgets import Knob, make_button, LedMeter  # noqa: E402
+from .eqbank import EQBank  # noqa: E402
+from .eqmodel import fmt_freq  # noqa: E402
+from .presetui import PresetPopover  # noqa: E402
+from .viz import LogSpectrum, WaveScope  # noqa: E402
+from .widgets import Knob, make_button, transport_button, LedMeter  # noqa: E402
 
 
 def _labeled(label_text, widget):
@@ -51,10 +52,12 @@ class EQView(Gtk.Box):
         # ---- mini player strip ----
         mini = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         mini.add_css_class("eaa-display")
-        self.m_play = win._xport("play", win.on_playpause)
-        for b in (win._xport("eject", win.on_open), win._xport("prev", win.on_prev),
-                  self.m_play, win._xport("stop", win.on_stop),
-                  win._xport("next", win.on_next)):
+        self.m_play = transport_button("play", win.on_playpause)
+        for b in (transport_button("eject", win.on_open),
+                  transport_button("prev", win.on_prev),
+                  self.m_play,
+                  transport_button("stop", win.on_stop),
+                  transport_button("next", win.on_next)):
             mini.append(b)
         self.m_time = Gtk.Label(label="00:00")
         self.m_time.add_css_class("eaa-ind")
@@ -67,20 +70,10 @@ class EQView(Gtk.Box):
         self.append(mini)
 
         # ---- meters: log-scale spectrum + waveform scope ----
-        self._levels = np.zeros(1, dtype=np.float32)
-        self._wave = np.zeros(1, dtype=np.float32)
         meters = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
-        self.spec = Gtk.DrawingArea()
-        self.spec.add_css_class("eaa-viz")
-        self.spec.set_content_height(66)
-        self.spec.set_hexpand(True)
-        self.spec.set_draw_func(self._draw_spectrum)
+        self.spec = LogSpectrum()
         meters.append(self.spec)
-        self.wave = Gtk.DrawingArea()
-        self.wave.add_css_class("eaa-viz")
-        self.wave.set_content_height(66)
-        self.wave.set_size_request(200, -1)
-        self.wave.set_draw_func(self._draw_wave)
+        self.wave = WaveScope()
         meters.append(self.wave)
         self.append(meters)
 
@@ -132,7 +125,7 @@ class EQView(Gtk.Box):
         self._selected = 0
         self.k_freq = Knob(math.log10(20), math.log10(20000), math.log10(1000),
                            step=0.02, default=math.log10(1000),
-                           fmt=lambda v: _fmt_freq(10 ** v), on_change=self._on_freq)
+                           fmt=lambda v: fmt_freq(10 ** v), on_change=self._on_freq)
         row1.append(_labeled("SEL FREQ", self.k_freq))
         self.k_q = Knob(0.3, 12.0, 1.41, step=0.1, default=1.41,
                         fmt=lambda v: f"Q{v:.1f}", on_change=self._on_q)
@@ -141,7 +134,9 @@ class EQView(Gtk.Box):
         # row 2: buttons
         self.presets_btn = Gtk.MenuButton(label="PRESETS")
         self.presets_btn.add_css_class("eaa-button")
-        self.presets_btn.set_popover(self._build_popover())
+        self.presets = PresetPopover(on_apply=self._apply_named,
+                                     on_save=self._save_named)
+        self.presets_btn.set_popover(self.presets)
         row2.append(_labeled("EQ PRESETS", self.presets_btn))
 
         imp = make_button("IMPORT")
@@ -161,60 +156,19 @@ class EQView(Gtk.Box):
         self._on_select(0)   # point the FREQ/Q knobs at band 0 initially
 
     # ---- presets ----
-    def _build_popover(self):
-        pop = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        for m in ("top", "bottom", "start", "end"):
-            getattr(box, f"set_margin_{m}")(6)
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_min_content_height(160)
-        scroller.set_min_content_width(180)
-        self._preset_list = Gtk.ListBox()
-        self._preset_list.connect("row-activated", self._on_preset_row)
-        scroller.set_child(self._preset_list)
-        box.append(scroller)
-        self._reload_presets()
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        self._name = Gtk.Entry()
-        self._name.set_placeholder_text("save as…")
-        box.append(self._name)
-        save = make_button("SAVE PRESET")
-        save.connect("clicked", self._on_save)
-        box.append(save)
-        pop.set_child(box)
-        return pop
-
-    def _reload_presets(self):
-        child = self._preset_list.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self._preset_list.remove(child)
-            child = nxt
-        for name in eqpresets.list_presets():
-            row = Gtk.ListBoxRow()
-            lbl = Gtk.Label(label=name, xalign=0)
-            lbl.set_margin_start(6)
-            lbl.set_margin_end(6)
-            row.set_child(lbl)
-            self._preset_list.append(row)
-
-    def _on_preset_row(self, _lb, row):
-        name = row.get_child().get_text()
+    def _apply_named(self, name):
         preamp, bands = eqpresets.load(name)
         # presets are 10-band graphic; apply via the small panel so both views
         # and the engine stay consistent, then resync this view.
         self.win.eq_panel.apply_preset(preamp, bands)
         self.k_bands.set_value(self.win.player.band_count())
         self.k_preamp.set_value(preamp)
-        self._name.set_text(name)
         self.refresh()
 
-    def _on_save(self, _btn):
-        name = self._name.get_text().strip() or "My EQ"
+    def _save_named(self, name):
         panel = self.win.eq_panel
         eqpresets.save(name, panel.eq.preamp, list(panel.eq.bands))
-        self._reload_presets()
+        panel.presets.reload()   # keep the other popover's list in sync
 
     # ---- import / export (Equalizer APO + AutoEQ GraphicEQ) ----
     def _build_export_popover(self):
@@ -293,12 +247,12 @@ class EQView(Gtk.Box):
             self.k_q.set_value(q)
 
     def _on_freq(self, v):
-        if getattr(self, "_selected", -1) >= 0:
+        if self._selected >= 0:
             self.win.player.set_band_param(self._selected, freq=10 ** v)
             self.refresh()
 
     def _on_q(self, v):
-        if getattr(self, "_selected", -1) >= 0:
+        if self._selected >= 0:
             self.win.player.set_band_param(self._selected, q=v)
 
     def _on_bands(self, v):
@@ -312,62 +266,19 @@ class EQView(Gtk.Box):
         for k in (self.k_preamp, self.k_in, self.k_out, self.k_bal):
             k.set_value(0.0)
         self.k_pitch.set_value(1.0)
-        self.win.player.set_in_gain(0); self.win.player.set_out_gain(0)
-        self.win.player.set_balance(0); self.win.player.set_pitch(1.0)
+        self.win.player.set_in_gain(0)
+        self.win.player.set_out_gain(0)
+        self.win.player.set_balance(0)
+        self.win.player.set_pitch(1.0)
         self.win.player.set_preamp(0)
         self.refresh()
         self._on_select(self._selected)        # re-sync SEL FREQ/Q knobs
 
     # ---- meters (fed from the window's capture) ----
     def set_audio(self, levels, vu, wave):
-        self._levels = levels
-        self._wave = wave
         self.led.set_levels(vu[0], vu[1])
-        self.spec.queue_draw()
-        self.wave.queue_draw()
-
-    def _draw_spectrum(self, _a, cr, w, h):
-        cr.set_source_rgb(0, 0, 0)
-        cr.paint()
-        n = len(self._levels)
-        if n < 2 or w <= 0:
-            return
-        # log-frequency tick lines (bands are already log-spaced 40Hz..24kHz)
-        cr.select_font_face("monospace")
-        cr.set_font_size(7)
-        lo, hi = 40.0, 24000.0
-        span = math.log10(hi / lo)
-        for f, lab in ((100, "100"), (1000, "1K"), (10000, "10K")):
-            x = (math.log10(f / lo) / span) * w
-            cr.set_source_rgba(0.3, 0.45, 0.7, 0.35)
-            cr.set_line_width(1)
-            cr.move_to(x, 0); cr.line_to(x, h - 9); cr.stroke()
-            cr.set_source_rgb(0.4, 0.55, 0.8)
-            cr.move_to(x + 2, h - 1); cr.show_text(lab)
-        # bars
-        bw = w / n
-        for i, lv in enumerate(self._levels):
-            bh = max(1.0, float(lv) * (h - 10))
-            warm = min(1.0, float(lv) * 1.3)
-            cr.set_source_rgb(0.12 + 0.8 * warm, 0.9 - 0.5 * warm, 0.12)
-            cr.rectangle(i * bw + 0.5, (h - 10) - bh, max(1.0, bw - 1), bh)
-            cr.fill()
-
-    def _draw_wave(self, _a, cr, w, h):
-        cr.set_source_rgb(0, 0, 0)
-        cr.paint()
-        wv = self._wave
-        n = len(wv)
-        if n < 2 or w <= 0:
-            return
-        mid = h / 2
-        cr.set_source_rgb(0.10, 0.95, 0.14)
-        cr.set_line_width(1.4)
-        for i in range(n):
-            x = i / (n - 1) * w
-            y = mid - float(wv[i]) * (h * 0.45)
-            cr.line_to(x, y) if i else cr.move_to(x, y)
-        cr.stroke()
+        self.spec.set_levels(levels)
+        self.wave.set_wave(wave)
 
     # ---- mini-player sync (called by the window) ----
     def set_time(self, text):

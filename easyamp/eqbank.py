@@ -14,18 +14,11 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
-from .eqwidget import paint_smoke, _vcolor  # shared look
+from .eqmodel import BAND_MIN, BAND_MAX, fmt_freq  # noqa: E402
+from .paint import paint_smoke, paint_thumb, value_color  # noqa: E402
 
-BAND_MIN, BAND_MAX = -24.0, 12.0
 CURVE_H = 34
 LABEL_H = 16
-
-
-def _fmt_freq(f: float) -> str:
-    if f >= 1000:
-        v = f / 1000.0
-        return f"{v:.0f}K" if v >= 10 or v == int(v) else f"{v:.1f}K"
-    return f"{f:.0f}"
 
 
 class EQBank(Gtk.DrawingArea):
@@ -115,7 +108,7 @@ class EQBank(Gtk.DrawingArea):
         for i in range(n):
             cx = (i + 0.5) * band_w
             cy = 3 + (BAND_MAX - self.gains[i]) / (BAND_MAX - BAND_MIN) * (CURVE_H - 6)
-            pts.append((cx, cy, _vcolor(self.gains[i], BAND_MIN, BAND_MAX)))
+            pts.append((cx, cy, value_color(self.gains[i], BAND_MIN, BAND_MAX)))
         cr.set_line_width(2)
         for i in range(len(pts) - 1):
             x1, y1, c1 = pts[i]
@@ -130,7 +123,7 @@ class EQBank(Gtk.DrawingArea):
         for i in range(n):
             cx = (i + 0.5) * band_w
             v = self.gains[i]
-            color = _vcolor(v, BAND_MIN, BAND_MAX)
+            color = value_color(v, BAND_MIN, BAND_MAX)
             if i == self.selected:                       # highlight selection
                 cr.set_source_rgb(0.16, 0.22, 0.45)
                 cr.rectangle(cx - band_w / 2 + 1, top - CURVE_H, band_w - 2,
@@ -145,23 +138,7 @@ class EQBank(Gtk.DrawingArea):
             cr.stroke()
 
             tw = min(band_w - 4, 20)
-            th = max(7, tw * 0.5)
-            ty = y_of(v) - th / 2
-            tx = cx - tw / 2
-            cr.set_source_rgb(0.80, 0.80, 0.84)
-            cr.rectangle(tx, ty, tw, th)
-            cr.fill()
-            cr.set_source_rgb(0.94, 0.94, 0.98)
-            cr.set_line_width(1)
-            cr.move_to(tx, ty + th); cr.line_to(tx, ty); cr.line_to(tx + tw, ty); cr.stroke()
-            cr.set_source_rgb(0.30, 0.30, 0.34)
-            cr.move_to(tx + tw, ty); cr.line_to(tx + tw, ty + th); cr.line_to(tx, ty + th); cr.stroke()
-            cr.set_source_rgb(0.22, 0.22, 0.26)
-            cr.set_line_width(1.2)
-            midy = ty + th / 2
-            for off in (-1.8, 1.8):
-                cr.move_to(cx - 4, midy + off); cr.line_to(cx + 4, midy + off)
-            cr.stroke()
+            paint_thumb(cr, cx, y_of(v), tw, max(7, tw * 0.5))
 
         # frequency labels (skip some when crowded)
         cr.select_font_face("monospace")
@@ -171,7 +148,7 @@ class EQBank(Gtk.DrawingArea):
             if i % step:
                 continue
             cx = (i + 0.5) * band_w
-            label = _fmt_freq(self.freqs[i])
+            label = fmt_freq(self.freqs[i])
             cr.set_source_rgb(0.55, 0.78, 1.0) if i == self.selected else \
                 cr.set_source_rgb(0.42, 0.58, 0.85)
             ext = cr.text_extents(label)
