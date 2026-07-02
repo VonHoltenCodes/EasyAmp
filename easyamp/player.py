@@ -9,8 +9,14 @@ bin holding the processing chain:
 The EQ is a single ``equalizer-nbands`` of N fully-parametric bands (10–32,
 independent centre freq, Q, gain), so it can model Equalizer-APO style filter
 sets. Output goes to the system sink, so the system-wide spectrum capture
-still sees it. (A per-channel deinterleave/interleave variant was tried but
-deadlocked on state changes — froze on track change — so the EQ is stereo.)
+still sees it.
+
+⚠️ The EQ is deliberately one stereo bank. A per-channel L/R variant
+(deinterleave → queue → EQ-L/EQ-R → interleave) was shipped in 0.4.1–0.4.3
+and reverted: tearing that topology down deadlocks on GStreamer state
+changes — ``set_state(NULL)`` hangs the main thread — freezing the app on
+every track change. Do not reintroduce a split without a design that is
+provably deadlock-free.
 """
 
 from __future__ import annotations
@@ -23,39 +29,12 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib  # noqa: E402
 
+from .eqmodel import (  # noqa: E402
+    DEFAULT_Q, GRAPHIC_NBANDS, PEAK, LOW_SHELF, HIGH_SHELF,
+    MIN_BANDS, MAX_BANDS, band_freqs, interp,
+)
+
 Gst.init(None)
-
-EQ_FREQS = [29, 59, 119, 237, 474, 947, 1889, 3770, 7523, 15011]
-NBANDS = 10
-MIN_BANDS, MAX_BANDS = 10, 32
-DEFAULT_Q = 1.41
-
-BAND_PEAK, BAND_LOW_SHELF, BAND_HIGH_SHELF = 0, 1, 2
-
-# channels
-STEREO, LEFT, RIGHT = "stereo", "left", "right"
-
-
-def _band_freqs(n: int) -> list[float]:
-    if n == 10:
-        return [float(f) for f in EQ_FREQS]
-    lo, hi = 30.0, 16000.0
-    return [lo * (hi / lo) ** (i / (n - 1)) for i in range(n)]
-
-
-def _interp(x: float, xs: list[float], ys: list[float]) -> float:
-    if not xs:
-        return 0.0
-    if x <= xs[0]:
-        return ys[0]
-    if x >= xs[-1]:
-        return ys[-1]
-    for i in range(1, len(xs)):
-        if x <= xs[i]:
-            d = xs[i] - xs[i - 1]
-            t = (x - xs[i - 1]) / d if d else 0.0
-            return ys[i - 1] + (ys[i] - ys[i - 1]) * t
-    return ys[-1]
 
 
 class Player:
@@ -66,7 +45,7 @@ class Player:
         self.on_error = on_error
         self._uri: str | None = None
         self._bitrate = 0
-        self._nbands = NBANDS
+        self._nbands = GRAPHIC_NBANDS
         self._bands: list[list] = []
         self._gen = 0               # bumped per load(); guards stale errors
         self._error_reported = False
@@ -83,9 +62,8 @@ class Player:
     # ---- pipeline construction ---------------------------------------
     def _build_eqbin(self) -> Gst.Bin:
         """Single-EQ chain: in-gain -> pitch -> equalizer-nbands -> tone ->
-        balance -> out-gain. (A per-channel deinterleave/interleave variant
-        was tried but its pipeline deadlocked on state changes — froze on
-        track change — so the EQ is a single stereo equalizer-nbands.)"""
+        balance -> out-gain. (See the module docstring for why the EQ must
+        stay a single stereo bank.)"""
         conv = Gst.ElementFactory.make("audioconvert", "eqconv")
         self.in_gain = Gst.ElementFactory.make("volume", "ingain")
         # cassette varispeed: prefer SoundTouch 'pitch' (Windows), else the
@@ -102,7 +80,7 @@ class Player:
         conv2 = Gst.ElementFactory.make("audioconvert", "eqconv2")
 
         self.eq.set_property("num-bands", self._nbands)
-        self._configure_bands(_band_freqs(self._nbands))
+        self._configure_bands(band_freqs(self._nbands))
 
         eqbin = Gst.Bin.new("eqbin")
         chain = [conv, self.in_gain]
@@ -134,8 +112,8 @@ class Player:
         self._bands = []
         n = len(freqs)
         for i, f in enumerate(freqs):
-            btype = (BAND_LOW_SHELF if i == 0 else
-                     BAND_HIGH_SHELF if i == n - 1 else BAND_PEAK)
+            btype = (LOW_SHELF if i == 0 else
+                     HIGH_SHELF if i == n - 1 else PEAK)
             bw = f / q
             b = self._band_obj(i)
             if b is not None:
@@ -189,9 +167,7 @@ class Player:
             )
 
     # ---- equalizer: gain (graphic-compatible) ------------------------
-    # `channel` is accepted for call-site compatibility but ignored — the EQ
-    # is a single stereo bank (per-channel split was removed; it deadlocked).
-    def set_band(self, index: int, gain_db: float, channel=STEREO) -> None:
+    def set_band(self, index: int, gain_db: float) -> None:
         b = self._band_obj(index)
         if b is not None:
             b.set_property("gain", float(gain_db))
@@ -203,17 +179,17 @@ class Player:
             self.set_band(i, 0.0)
 
     def reset_bands(self) -> None:
-        self._configure_bands(_band_freqs(self._nbands))
+        self._configure_bands(band_freqs(self._nbands))
 
     # ---- equalizer: parametric ---------------------------------------
     def band_count(self) -> int:
         return self._nbands
 
-    def get_bands(self, channel=STEREO) -> list[list]:
+    def get_bands(self) -> list[list]:
         return [list(b) for b in self._bands]
 
     def set_band_param(self, index, freq=None, q=None, gain=None,
-                       btype=None, channel=STEREO) -> None:
+                       btype=None) -> None:
         if not (0 <= index < len(self._bands)):
             return
         b = self._bands[index]
@@ -241,23 +217,23 @@ class Player:
         old_f = [math.log10(b[0]) for b in self._bands]
         old_g = [b[2] for b in self._bands]
         self._nbands = n
-        new_freqs = _band_freqs(n)
+        new_freqs = band_freqs(n)
         try:
             self.eq.set_property("num-bands", n)
         except Exception:
             pass
         self._configure_bands(new_freqs)
         for i, f in enumerate(new_freqs):
-            self.set_band(i, round(_interp(math.log10(f), old_f, old_g), 1))
+            self.set_band(i, round(interp(math.log10(f), old_f, old_g), 1))
 
-    def load_bands(self, bands, preamp=None, channel=STEREO) -> None:
+    def load_bands(self, bands, preamp=None) -> None:
         n = max(MIN_BANDS, min(MAX_BANDS, len(bands)))
         self._nbands = n
         try:
             self.eq.set_property("num-bands", n)
         except Exception:
             pass
-        self._configure_bands(_band_freqs(n))
+        self._configure_bands(band_freqs(n))
         for i in range(n):
             if i < len(bands):
                 f, q, g, t = bands[i]

@@ -1,4 +1,6 @@
-"""Shared custom widgets: gold-bar title bars in the classic-player style."""
+"""Shared custom widgets and small UI builders in the classic-player style:
+gold-bar title bars, beveled buttons, transport buttons, the seek bar, knobs,
+LED meters, and the marquee text scroller."""
 
 from __future__ import annotations
 
@@ -9,9 +11,41 @@ import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import Gtk, GLib  # noqa: E402
 
 GOLD = (0.85, 0.70, 0.24)
+MARQUEE_WIDTH = 24
+
+
+class Marquee:
+    """Scrolls text that doesn't fit through a fixed-width label."""
+
+    def __init__(self, label, width=MARQUEE_WIDTH, interval=220):
+        self.label = label
+        self.width = width
+        self.interval = interval
+        self._src = None
+        self._scroll = ""
+        self._pos = 0
+
+    def set_text(self, text):
+        text = text or "--"
+        if self._src is not None:
+            GLib.source_remove(self._src)
+            self._src = None
+        self._pos = 0
+        if len(text) <= self.width:
+            self.label.set_text(text.ljust(self.width))
+        else:
+            self._scroll = text + "   ***   "
+            self._src = GLib.timeout_add(self.interval, self._tick)
+            self._tick()
+
+    def _tick(self):
+        s = self._scroll
+        self.label.set_text((s[self._pos:] + s[: self._pos])[: self.width])
+        self._pos = (self._pos + 1) % len(s)
+        return True
 
 
 class GoldBars(Gtk.DrawingArea):
@@ -238,6 +272,18 @@ def make_button(label: str, toggle: bool = False, led: bool = False):
     return btn
 
 
+def transport_button(kind: str, cb) -> Gtk.Button:
+    """A transport button (eject/prev/play/pause/stop/next) whose glyph is a
+    :class:`TransportIcon`, exposed as ``.icon`` so callers can flip it
+    (e.g. play ↔ pause)."""
+    b = Gtk.Button()
+    b.icon = TransportIcon(kind)
+    b.set_child(b.icon)
+    b.add_css_class("eaa-xport")
+    b.connect("clicked", cb)
+    return b
+
+
 def set_led(btn, on: bool) -> None:
     led = getattr(btn, "_led", None)
     if led is not None:
@@ -378,17 +424,17 @@ class LedMeter(Gtk.DrawingArea):
 
     def __init__(self):
         super().__init__()
-        self.l = self.r = 0.0
-        self.pl = self.pr = 0.0          # peak hold
+        self.lv_l = self.lv_r = 0.0
+        self.pk_l = self.pk_r = 0.0      # peak hold
         self.set_content_height(40)
         self.set_hexpand(True)
         self.set_draw_func(self._draw)
 
-    def set_levels(self, l, r):
-        self.l = max(0.0, min(1.0, float(l)))
-        self.r = max(0.0, min(1.0, float(r)))
-        self.pl = max(self.l, self.pl - 0.012)
-        self.pr = max(self.r, self.pr - 0.012)
+    def set_levels(self, left, right):
+        self.lv_l = max(0.0, min(1.0, float(left)))
+        self.lv_r = max(0.0, min(1.0, float(right)))
+        self.pk_l = max(self.lv_l, self.pk_l - 0.012)
+        self.pk_r = max(self.lv_r, self.pk_r - 0.012)
         self.queue_draw()
 
     @staticmethod
@@ -425,8 +471,8 @@ class LedMeter(Gtk.DrawingArea):
         lbl_w, db_w = 12.0, 30.0
         bar_w = w - lbl_w - db_w - 4
         bh = (h - 9) / 2
-        for idx, (lab, lvl, pk) in enumerate((("L", self.l, self.pl),
-                                              ("R", self.r, self.pr))):
+        for idx, (lab, lvl, pk) in enumerate((("L", self.lv_l, self.pk_l),
+                                              ("R", self.lv_r, self.pk_r))):
             y = 2 + idx * (bh + 4)
             cr.set_source_rgb(0.45, 0.6, 0.85)
             cr.move_to(1, y + bh - 1)

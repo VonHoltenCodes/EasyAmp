@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 
-NBANDS = 10
+from .eqmodel import GRAPHIC_NBANDS as NBANDS
 
 USER_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
@@ -30,7 +30,7 @@ BUILTIN: dict[str, list[float]] = {
     "Pop":       [-1, 1, 3, 4, 4, 2, 0, -1, -1, -2],
     "Jazz":      [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
     "Classical": [4, 3, 2, 1, -1, -1, 0, 2, 3, 4],
-    "Bass Boost":[7, 6, 5, 3, 1, 0, 0, 0, 0, 0],
+    "Bass Boost": [7, 6, 5, 3, 1, 0, 0, 0, 0, 0],
     "Treble":    [0, 0, 0, 0, 0, 1, 3, 5, 6, 7],
     "Vocal":     [-2, -1, 0, 2, 4, 4, 3, 1, 0, -1],
 }
