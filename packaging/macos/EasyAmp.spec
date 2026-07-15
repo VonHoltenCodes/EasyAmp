@@ -56,10 +56,35 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
+    # Without this, hooks-contrib's gi.repository.Gtk hook defaults to
+    # Gtk 3.0 and collects GTK3 alongside our GTK4.
+    hooksconfig={"gi": {"module-versions": {"Gtk": "4.0", "Gdk": "4.0"}}},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
 )
+
+# GTK3 must never ship in this bundle. Its macOS backend registers the same
+# Objective-C menu classes (GNSMenu, the NSMenuItem GtkMenuTrackerItem
+# category) as GTK4's; ObjC classes are process-global, so GTK4's menubar
+# code resolves into GTK3's implementation and segfaults at launch.
+# libgstgtk (GTK3 gtksink, swept up with the other GStreamer plugins) is
+# what drags libgtk-3 in via dependency analysis — drop it too. The dot in
+# "libgstgtk." keeps the GTK4 plugin (libgstgtk4) safe.
+_GTK3_MARKERS = (
+    "libgtk-3", "libgdk-3", "Gtk-3.0.typelib", "Gdk-3.0.typelib",
+    "GdkX11-3.0.typelib", "libgstgtk.",
+)
+
+def _no_gtk3(toc):
+    return [
+        (name, path, typ) for name, path, typ in toc
+        if not any(m in name or m in path for m in _GTK3_MARKERS)
+    ]
+
+a.binaries = _no_gtk3(a.binaries)
+a.datas = _no_gtk3(a.datas)
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -90,6 +115,6 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "CFBundleDisplayName": "EasyAmp",
-        "CFBundleShortVersionString": "0.4.10",
+        "CFBundleShortVersionString": "0.5.0",
     },
 )

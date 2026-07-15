@@ -56,6 +56,10 @@ jobs:
           echo "libgtk dylib: $(find "$APP" -iname 'libgtk-4*' | head -1 || echo MISSING)"
           echo "varispeed (speed) plugin: $(find "$APP" -iname '*libgstspeed*' | head -1 || echo MISSING)"
           test -n "$(find "$APP" -iname 'Gtk-4.0.typelib')" || { echo 'ERROR: Gtk typelib missing'; exit 1; }
+          # GTK3 in the bundle segfaults the app at launch: its macOS menu
+          # ObjC classes collide with GTK4's (process-global namespace).
+          GTK3_HITS=$(find "$APP" -iname 'libgtk-3*' -o -iname 'libgdk-3*' -o -iname 'Gtk-3.0.typelib' -o -iname 'Gdk-3.0.typelib')
+          if [ -n "$GTK3_HITS" ]; then echo "ERROR: GTK3 leaked into the bundle:"; echo "$GTK3_HITS"; exit 1; fi
 
       - name: Ad-hoc code-sign the .app
         run: |
