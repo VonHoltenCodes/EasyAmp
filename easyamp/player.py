@@ -51,6 +51,10 @@ class Player:
         self._error_reported = False
 
         self.playbin = Gst.ElementFactory.make("playbin", "easyamp-player")
+        if self.playbin is None:
+            raise RuntimeError(
+                "GStreamer element 'playbin' unavailable — plugins not found "
+                f"(GST_PLUGIN_PATH={os.environ.get('GST_PLUGIN_PATH')!r})")
         self.playbin.set_property("audio-filter", self._build_eqbin())
 
         bus = self.playbin.get_bus()
@@ -78,6 +82,15 @@ class Player:
         self.balance = Gst.ElementFactory.make("audiopanorama", "balance")
         self.out_gain = Gst.ElementFactory.make("volume", "outgain")
         conv2 = Gst.ElementFactory.make("audioconvert", "eqconv2")
+
+        required = {"audioconvert": conv, "volume": self.in_gain,
+                    "equalizer-nbands": self.eq}
+        missing = [name for name, el in required.items() if el is None]
+        if missing:
+            raise RuntimeError(
+                f"GStreamer elements unavailable: {', '.join(missing)} — "
+                f"plugins not found "
+                f"(GST_PLUGIN_PATH={os.environ.get('GST_PLUGIN_PATH')!r})")
 
         self.eq.set_property("num-bands", self._nbands)
         self._configure_bands(band_freqs(self._nbands))

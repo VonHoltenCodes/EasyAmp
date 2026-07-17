@@ -51,8 +51,32 @@ class EasyAmpApp(Gtk.Application):
         self._css_installed = True
 
     def do_activate(self):
-        self._install_css()
-        win = self.props.active_window or EasyAmpWindow(self)
+        # PyGObject swallows exceptions raised in signal handlers (it prints
+        # them to stderr and keeps the main loop running), so a failure here
+        # would leave a live process with no window and no visible error.
+        # Catch it and show the traceback in a bare-bones window instead.
+        try:
+            self._install_css()
+            win = self.props.active_window or EasyAmpWindow(self)
+            win.present()
+        except Exception:
+            import traceback
+            tb = traceback.format_exc()
+            print(tb, file=sys.stderr)
+            self._show_startup_error(tb)
+
+    def _show_startup_error(self, tb: str):
+        win = Gtk.ApplicationWindow(application=self, title="EasyAmp — startup error")
+        win.set_default_size(700, 420)
+        view = Gtk.TextView(editable=False, monospace=True,
+                            wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                            top_margin=8, bottom_margin=8,
+                            left_margin=8, right_margin=8)
+        view.get_buffer().set_text(
+            "EasyAmp failed to start. Please report this:\n\n" + tb)
+        scroll = Gtk.ScrolledWindow(vexpand=True)
+        scroll.set_child(view)
+        win.set_child(scroll)
         win.present()
 
 
