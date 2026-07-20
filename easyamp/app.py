@@ -21,6 +21,17 @@ APP_ID = "com.vonholtencodes.EasyAmp"
 STYLE = os.path.join(os.path.dirname(__file__), "style.css")
 
 
+def _close_splash():
+    """Close the PyInstaller bootloader splash (Windows build only). The
+    pyi_splash module is injected solely into the frozen splash build, so
+    this is a harmless no-op everywhere else. Safe to call more than once."""
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except Exception:
+        pass
+
+
 class EasyAmpApp(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
@@ -58,11 +69,15 @@ class EasyAmpApp(Gtk.Application):
         try:
             self._install_css()
             win = self.props.active_window or EasyAmpWindow(self)
+            # Dismiss the Windows bootloader splash once the window is on
+            # screen, so there's no gap of blank desktop between the two.
+            win.connect("map", lambda *_: _close_splash())
             win.present()
         except Exception:
             import traceback
             tb = traceback.format_exc()
             print(tb, file=sys.stderr)
+            _close_splash()
             self._show_startup_error(tb)
 
     def _show_startup_error(self, tb: str):

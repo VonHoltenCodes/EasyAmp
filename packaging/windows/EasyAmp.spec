@@ -118,9 +118,25 @@ a.datas = _drop_unused_gst_plugins(a.datas)
 
 pyz = PYZ(a.pure)
 
+# Splash shown by the bootloader within ~1s of launch, before Python starts
+# importing GTK/GStreamer — the ~20s of native init that follows now has a
+# logo on screen instead of nothing. easyamp.app closes it via pyi_splash the
+# moment the real window maps. (PyInstaller splash is Windows/Linux only,
+# which is exactly where we need it; the macOS build has none.)
+splash = Splash(
+    "splash.png",
+    binaries=a.binaries,
+    datas=a.datas,
+    text_pos=(20, 248),
+    text_size=11,
+    text_color="white",
+    always_on_top=True,
+)
+
 exe = EXE(
     pyz,
     a.scripts,
+    splash,                 # splash control lives in the EXE
     [],
     exclude_binaries=True,
     name="EasyAmp",
@@ -134,6 +150,7 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
+    splash.binaries,        # bundled Tcl/Tk the splash renders with
     strip=False,
     upx=False,
     name="EasyAmp",

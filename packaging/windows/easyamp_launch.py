@@ -53,6 +53,15 @@ def _bootstrap_gtk_runtime() -> None:
 if getattr(sys, "frozen", False) and sys.platform == "win32":
     _bootstrap_gtk_runtime()
 
+# Update the bootloader splash before the slow GTK/GStreamer imports below,
+# so the user sees progress text while the audio stack loads. app.py closes
+# the splash when the window maps. Absent in unfrozen/dev runs — harmless.
+try:
+    import pyi_splash  # noqa: E402  (injected by PyInstaller only in the splash build)
+    pyi_splash.update_text("Loading audio engine…")
+except Exception:
+    pass
+
 from easyamp.app import main  # noqa: E402 — must follow the runtime setup above
 
 sys.exit(main())
