@@ -127,9 +127,9 @@ splash = Splash(
     "splash.png",
     binaries=a.binaries,
     datas=a.datas,
-    text_pos=(20, 248),
-    text_size=11,
-    text_color="white",
+    text_pos=(150, 322),    # live status line under the baked-in messaging
+    text_size=10,
+    text_color="#d2aa3c",
     always_on_top=True,
 )
 

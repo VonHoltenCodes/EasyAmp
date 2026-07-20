@@ -22,6 +22,13 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 WizardStyle=modern
 DisableProgramGroupPage=yes
+; In-place upgrades: AppId defaults to AppName ("EasyAmp") and DefaultDirName
+; is constant, so a new installer upgrades the existing install in place —
+; the splash tells users they can install right over their current version.
+; CloseApplications lets Setup shut a running EasyAmp so the .exe can be
+; replaced instead of erroring on a locked file.
+CloseApplications=yes
+RestartApplications=no
 
 [Files]
 Source: "dist\EasyAmp\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs

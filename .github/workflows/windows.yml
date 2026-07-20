@@ -61,16 +61,43 @@ jobs:
       - name: Build the bootloader splash image
         run: |
           python - <<'PY'
-          from PIL import Image, ImageDraw
-          W, H = 420, 300
+          import glob, os, re
+          from PIL import Image, ImageDraw, ImageFont
+
+          def font(size, bold=False):
+              names = ["DejaVuSans-Bold.ttf"] if bold else ["DejaVuSans.ttf"]
+              for r in ("/mingw64/share/fonts", "/usr/share/fonts", "C:/Windows/Fonts"):
+                  for n in names:
+                      for c in glob.glob(os.path.join(r, "**", n), recursive=True):
+                          try: return ImageFont.truetype(c, size)
+                          except Exception: pass
+              return ImageFont.load_default()
+
+          ver = "dev"
+          with open("easyamp/__init__.py") as f:
+              m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+              if m: ver = m.group(1)
+
+          W, H = 480, 360
+          GOLD = (210, 170, 60, 255); FG = (232, 232, 238, 255); DIM = (170, 172, 180, 255)
           bg = Image.new("RGBA", (W, H), (18, 18, 22, 255))
           d = ImageDraw.Draw(bg)
-          d.rectangle([0, 0, W - 1, H - 1], outline=(210, 170, 60, 255), width=2)
-          logo = Image.open("assets/icons/easyamp-256.png").convert("RGBA").resize((150, 150), Image.LANCZOS)
-          bg.alpha_composite(logo, ((W - 150) // 2, 40))
-          d.text((W // 2, 210), "EasyAmp", anchor="mm", fill=(235, 235, 240, 255))
+          d.rectangle([0, 0, W - 1, H - 1], outline=GOLD, width=2)
+          logo = Image.open("assets/icons/easyamp-256.png").convert("RGBA").resize((116, 116), Image.LANCZOS)
+          bg.alpha_composite(logo, ((W - 116) // 2, 24))
+
+          def center(y, text, fnt, fill):
+              w = d.textlength(text, font=fnt)
+              d.text(((W - w) / 2, y), text, font=fnt, fill=fill)
+
+          center(150, f"EasyAmp  v{ver}", font(23, bold=True), FG)
+          center(186, "Thank you for downloading - and for your support!", font(13), FG)
+          center(212, "Always free & open source", font(13), GOLD)
+          center(240, "Updates install right over your existing version", font(12), DIM)
+          center(262, "- no need to uninstall first", font(12), DIM)
+          center(290, f"This release (v{ver}): bug fixes & improvements", font(12), DIM)
           bg.convert("RGB").save("packaging/windows/splash.png")
-          print("splash.png written")
+          print("splash.png written for v" + ver)
           PY
 
       - name: Build the .exe (PyInstaller)
