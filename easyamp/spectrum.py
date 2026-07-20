@@ -23,6 +23,8 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib  # noqa: E402
 import numpy as np  # noqa: E402
 
+from .player import make_element  # noqa: E402
+
 Gst.init(None)
 
 RATE = 48000
@@ -62,15 +64,15 @@ def _make_capture_source():
     """
     if sys.platform == "win32":
         for factory in ("wasapi2src", "wasapisrc"):
-            el = Gst.ElementFactory.make(factory, None)
+            el = make_element(factory, None)
             if el is not None:
                 el.set_property("loopback", True)
                 return el
     dev = _find_monitor_device()
     if dev is not None:
         return dev.create_element(None)
-    return (Gst.ElementFactory.make("autoaudiosrc", None)
-            or Gst.ElementFactory.make("pulsesrc", None))
+    return (make_element("autoaudiosrc", None)
+            or make_element("pulsesrc", None))
 
 
 class SpectrumCapture:
@@ -99,11 +101,11 @@ class SpectrumCapture:
         src = _make_capture_source()
         if src is None:
             return
-        conv = Gst.ElementFactory.make("audioconvert", None)
-        capsf = Gst.ElementFactory.make("capsfilter", None)
+        conv = make_element("audioconvert", None)
+        capsf = make_element("capsfilter", None)
         capsf.set_property("caps", Gst.Caps.from_string(
             f"audio/x-raw,format=F32LE,channels=2,rate={RATE},layout=interleaved"))
-        sink = Gst.ElementFactory.make("appsink", "sink")
+        sink = make_element("appsink", "sink")
         sink.set_property("emit-signals", True)
         sink.set_property("max-buffers", 6)
         sink.set_property("drop", True)

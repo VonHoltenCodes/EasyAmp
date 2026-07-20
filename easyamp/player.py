@@ -37,6 +37,26 @@ from .eqmodel import (  # noqa: E402
 Gst.init(None)
 
 
+# PyGObject changed the contract of ElementFactory.make(): older versions
+# return None for a missing element, newer ones (seen on the macOS build's
+# Python 3.14 / PyGObject) raise Gst.MissingPluginError instead. This whole
+# pipeline is written around the None contract — the SoundTouch 'pitch'
+# element is absent from macOS Homebrew and is meant to fall back to 'speed',
+# and tone/balance are optional too. Normalise back to None so those
+# fallbacks work on both, instead of the exception killing startup.
+_MISSING_ELEMENT_EXC = tuple(
+    exc for exc in (getattr(Gst, "MissingPluginError", None), GLib.Error)
+    if isinstance(exc, type)
+)
+
+
+def make_element(factory, name=None):
+    try:
+        return Gst.ElementFactory.make(factory, name)
+    except _MISSING_ELEMENT_EXC:
+        return None
+
+
 class Player:
     def __init__(self, on_tags=None, on_eos=None, on_state=None, on_error=None):
         self.on_tags = on_tags
@@ -50,7 +70,7 @@ class Player:
         self._gen = 0               # bumped per load(); guards stale errors
         self._error_reported = False
 
-        self.playbin = Gst.ElementFactory.make("playbin", "easyamp-player")
+        self.playbin = make_element("playbin", "easyamp-player")
         if self.playbin is None:
             raise RuntimeError(
                 "GStreamer element 'playbin' unavailable — plugins not found "
@@ -68,24 +88,25 @@ class Player:
         """Single-EQ chain: in-gain -> pitch -> equalizer-nbands -> tone ->
         balance -> out-gain. (See the module docstring for why the EQ must
         stay a single stereo bank.)"""
-        conv = Gst.ElementFactory.make("audioconvert", "eqconv")
-        self.in_gain = Gst.ElementFactory.make("volume", "ingain")
+        conv = make_element("audioconvert", "eqconv")
+        self.in_gain = make_element("volume", "ingain")
         # cassette varispeed: prefer SoundTouch 'pitch' (Windows), else the
         # dependency-free 'speed' resampler (in the GNOME runtime + brew bad).
-        self.pitch = Gst.ElementFactory.make("pitch", "pitch")
+        self.pitch = make_element("pitch", "pitch")
         self._pitch_prop = "rate"
         if self.pitch is None:
-            self.pitch = Gst.ElementFactory.make("speed", "speed")
+            self.pitch = make_element("speed", "speed")
             self._pitch_prop = "speed"
-        self.eq = Gst.ElementFactory.make("equalizer-nbands", "eq")
-        self.tone = Gst.ElementFactory.make("equalizer-3bands", "tone")
-        self.balance = Gst.ElementFactory.make("audiopanorama", "balance")
-        self.out_gain = Gst.ElementFactory.make("volume", "outgain")
-        conv2 = Gst.ElementFactory.make("audioconvert", "eqconv2")
+        self.eq = make_element("equalizer-nbands", "eq")
+        self.tone = make_element("equalizer-3bands", "tone")
+        self.balance = make_element("audiopanorama", "balance")
+        self.out_gain = make_element("volume", "outgain")
+        conv2 = make_element("audioconvert", "eqconv2")
 
-        required = {"audioconvert": conv, "volume": self.in_gain,
-                    "equalizer-nbands": self.eq}
-        missing = [name for name, el in required.items() if el is None]
+        required = [("audioconvert", conv), ("volume", self.in_gain),
+                    ("equalizer-nbands", self.eq), ("volume", self.out_gain),
+                    ("audioconvert", conv2)]
+        missing = [name for name, el in required if el is None]
         if missing:
             raise RuntimeError(
                 f"GStreamer elements unavailable: {', '.join(missing)} — "
