@@ -76,6 +76,11 @@ jobs:
           echo "Gtk typelib present in bundle: $(ls packaging/windows/dist/EasyAmp/_internal/gi_typelibs/ | grep -i gtk || echo MISSING)"
           echo "libgtk dll present: $(find packaging/windows/dist/EasyAmp -iname 'libgtk-4*' | head -1 || echo MISSING)"
           echo "soundtouch (pitch) plugin: $(find packaging/windows/dist/EasyAmp -iname '*soundtouch*' | head -1 || echo MISSING)"
+          echo "bundled GStreamer plugins: $(find packaging/windows/dist/EasyAmp -iname 'libgst*.dll' -path '*gst*plugin*' -o -iname 'libgst*.dll' | grep -Ei 'libgst[a-z0-9]+\.dll' | wc -l) (video/network/AI families pruned in the spec)"
+          # sanity: the audio essentials must survive the prune
+          for p in libgstlibav libgstasf libgstisomp4 libgstflac libgstmpg123 libgstwasapi libgstplayback libgsttypefindfunctions; do
+            find packaging/windows/dist/EasyAmp -iname "${p}*.dll" | head -1 | grep -q . || echo "WARN: expected audio plugin ${p} not found"
+          done
 
       # Sign EasyAmp.exe BEFORE zipping so the portable archive contains the
       # signed binary. Azure login uses GitHub OIDC; no client secret stored.

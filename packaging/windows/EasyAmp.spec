@@ -63,6 +63,59 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+
+# --- Drop GStreamer plugins a local audio player can never use ------------
+# collect_all pulls in the whole gst-plugins-{base,good,bad} + libav set:
+# hundreds of plugin DLLs. GStreamer scans/validates every one of them to
+# build its registry at startup, and Windows loads + AV-scans each DLL, which
+# is the bulk of the slow launch. None of the families below touch local (or
+# http) audio playback, so removing them speeds startup and shrinks the
+# bundle without changing what EasyAmp can play. This is a DENYLIST on
+# purpose: every audio decoder/parser/demuxer, libav, the container demuxers
+# (asf/wma, isomp4, matroska, ogg), the http source, and album-art image
+# loaders are all kept — anything not explicitly listed here stays.
+_GST_PLUGIN_DENY = (
+    # streaming / network transport (local + plain-http playback don't need these)
+    "gstrtsp", "gstrtpmanager", "gstrtp", "gstsrtp", "gstdtls", "gstsctp",
+    "gstwebrtc", "gstdashdemux", "gstdash", "gsthls", "gstadaptivedemux",
+    "gstsrt", "gstrist", "gstrtmp", "gstquic", "gstnetsim", "gstipcpipeline",
+    # hardware video capture / GPU video
+    "gstdecklink", "gstnvcodec", "gstnvenc", "gstnvdec", "gstd3d11", "gstd3d12",
+    "gstwinscreencap", "gstwinks", "gstdshowvideo", "gstvaapi", "gstmsdk",
+    # pure video decoders / encoders
+    "gstx264", "gstx265", "gstopenh264", "gstde265", "gstkvazaar", "gstaom",
+    "gstdav1d", "gstvpx", "gstsvtav1", "gsttheora", "gstschro",
+    # video processing / effects / GL
+    "gstvideoconvertscale", "gstvideofilter", "gstvideobox", "gstvideocrop",
+    "gstvideorate", "gstvideosignal", "gstvideoparsersbad", "gstdeinterlace",
+    "gstcompositor", "gstoverlaycomposition", "gstgeometrictransform",
+    "gstcoloreffects", "gstgaudieffects", "gstalphacolor", "gstalpha",
+    "gstsmpte", "gstframepositioner", "gstopengl", "gstglstereo",
+    # visualizers (EasyAmp draws its own from the appsink)
+    "gstaudiovisualizers", "gstgoom", "gstgoom2k1", "gstlibvisual",
+    "gstspectrascope",
+    # AI / cloud / analytics
+    "gstanalytics", "gstdeepgram", "gstelevenlabs", "gstdemucs", "gstclaxon",
+    "gstonnx", "gsttensor", "gstwhisper", "gstaws", "gsttranscriber",
+    # subtitles / captions
+    "gstsubparse", "gstsubenc", "gstclosedcaption", "gstcccombiner",
+    "gstdvbsub", "gstdvdsub", "gstassrender", "gstkate", "gstttml", "gstsami",
+)
+
+
+def _drop_unused_gst_plugins(toc):
+    kept = []
+    for name, path, typ in toc:
+        base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+        if base.startswith("libgst") and any(tok in base for tok in _GST_PLUGIN_DENY):
+            continue
+        kept.append((name, path, typ))
+    return kept
+
+
+a.binaries = _drop_unused_gst_plugins(a.binaries)
+a.datas = _drop_unused_gst_plugins(a.datas)
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
