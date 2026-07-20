@@ -115,6 +115,6 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "CFBundleDisplayName": "EasyAmp",
-        "CFBundleShortVersionString": "0.5.0",
+        "CFBundleShortVersionString": "0.5.1",
     },
 )
