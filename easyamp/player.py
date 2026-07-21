@@ -70,12 +70,16 @@ class Player:
         self._gen = 0               # bumped per load(); guards stale errors
         self._error_reported = False
 
+        self.viz_sink = None        # appsink tapping our own output, or None
         self.playbin = make_element("playbin", "easyamp-player")
         if self.playbin is None:
             raise RuntimeError(
                 "GStreamer element 'playbin' unavailable — plugins not found "
                 f"(GST_PLUGIN_PATH={os.environ.get('GST_PLUGIN_PATH')!r})")
         self.playbin.set_property("audio-filter", self._build_eqbin())
+        sink = self._build_audio_sink()
+        if sink is not None:
+            self.playbin.set_property("audio-sink", sink)
 
         bus = self.playbin.get_bus()
         bus.add_signal_watch()
@@ -135,6 +139,62 @@ class Player:
         eqbin.add_pad(Gst.GhostPad.new("sink", chain[0].get_static_pad("sink")))
         eqbin.add_pad(Gst.GhostPad.new("src", chain[-1].get_static_pad("src")))
         return eqbin
+
+    def _build_audio_sink(self):
+        """Playback sink that also tees a copy of our own audio into an
+        appsink for the visualizer. The old visualizer captured *system*
+        audio via a sink-monitor source, which doesn't exist on macOS, so
+        the spectrum/VU meters were blank there. Tapping our own output makes
+        the meters work on every platform with no loopback device.
+
+        The viz branch is isolated behind a leaky queue and a drop/no-sync
+        appsink so it can never stall playback. On any missing element we
+        return the plain sink (or None → playbin's default), so audio always
+        plays even if the tap can't be built.
+        """
+        realsink = (make_element("autoaudiosink", None)
+                    or make_element("osxaudiosink", None)
+                    or make_element("wasapisink", None)
+                    or make_element("pulsesink", None))
+        tee = make_element("tee", None)
+        q_out = make_element("queue", "asink-q-out")
+        q_viz = make_element("queue", "asink-q-viz")
+        conv = make_element("audioconvert", "asink-conv")
+        resample = make_element("audioresample", "asink-resample")
+        capsf = make_element("capsfilter", "asink-caps")
+        appsink = make_element("appsink", "vizsink")
+        if not all((realsink, tee, q_out, q_viz, conv, resample, capsf, appsink)):
+            return realsink        # best effort: play, just without the tap
+
+        capsf.set_property("caps", Gst.Caps.from_string(
+            "audio/x-raw,format=F32LE,channels=2,rate=48000,layout=interleaved"))
+        # the viz branch must drop, never block, so playback is never held up
+        q_viz.set_property("leaky", 2)           # 2 = leak downstream (oldest)
+        q_viz.set_property("max-size-buffers", 8)
+        q_viz.set_property("max-size-bytes", 0)
+        q_viz.set_property("max-size-time", 0)
+        appsink.set_property("emit-signals", True)
+        appsink.set_property("max-buffers", 6)
+        appsink.set_property("drop", True)
+        appsink.set_property("sync", False)
+
+        binn = Gst.Bin.new("easyamp-audiosink")
+        for el in (tee, q_out, realsink, q_viz, conv, resample, capsf, appsink):
+            binn.add(el)
+        q_out.link(realsink)
+        conv.link(resample) and resample.link(capsf) and capsf.link(appsink)
+        q_viz.link(conv)
+
+        def _tee_src():
+            # request_pad_simple is the modern name; fall back for older GStreamer
+            get = getattr(tee, "request_pad_simple", None) or tee.get_request_pad
+            return get("src_%u")
+        _tee_src().link(q_out.get_static_pad("sink"))
+        _tee_src().link(q_viz.get_static_pad("sink"))
+
+        binn.add_pad(Gst.GhostPad.new("sink", tee.get_static_pad("sink")))
+        self.viz_sink = appsink
+        return binn
 
     def _band_obj(self, i):
         try:

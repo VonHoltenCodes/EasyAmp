@@ -82,6 +82,7 @@ class SpectrumCapture:
         self.levels = np.zeros(bands, dtype=np.float32)
         self.vu = (0.0, 0.0)
         self._pipeline = None
+        self._external = None       # appsink we attached to, if any
         self._buf = np.empty(0, dtype=np.float32)   # interleaved stereo
         self._window = np.hanning(FFT).astype(np.float32)
         self._smoothed = np.zeros(bands, dtype=np.float32)
@@ -94,6 +95,17 @@ class SpectrumCapture:
             np.where((freqs >= edges[i]) & (freqs < edges[i + 1]))[0]
             for i in range(bands)
         ]
+
+    def attach(self, appsink) -> bool:
+        """Drive the visualizer from an existing appsink — the player's own
+        output tap (:attr:`Player.viz_sink`). Preferred over :meth:`start`
+        because it reflects exactly what EasyAmp is playing and needs no
+        system-audio monitor (macOS has none). Returns True if attached."""
+        if appsink is None:
+            return False
+        appsink.connect("new-sample", self._on_sample)
+        self._external = appsink
+        return True
 
     def start(self) -> None:
         if self._pipeline is not None:

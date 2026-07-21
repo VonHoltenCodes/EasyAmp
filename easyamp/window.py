@@ -163,7 +163,10 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         outer.append(self.playlist_panel)
 
         self.spectrum = SpectrumCapture(bands=VIZ_BANDS, on_data=self._on_data)
-        self.connect("map", lambda *_: self.spectrum.start())
+        # Prefer tapping the player's own output (works everywhere, incl.
+        # macOS); fall back to system-audio capture only if the tap is absent.
+        self.connect("map", lambda *_: (
+            self.spectrum.attach(self.player.viz_sink) or self.spectrum.start()))
         self.connect("close-request", self._on_close)
         self._pos_src = GLib.timeout_add(250, self._tick_position)
 
