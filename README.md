@@ -33,7 +33,7 @@ Grab a ready-to-run build from the **[latest release](https://github.com/VonHolt
 | Platform | Download | Notes |
 |----------|----------|-------|
 | 🪟 **Windows** (x64) | **[Installer (.exe)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-Setup-x64.exe)** · [Portable (.zip)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-windows-x64.zip) | Code-signed (publisher **trenton von holten**, via Azure Trusted Signing) |
-| 🍎 **macOS** (Apple Silicon) | **[Disk image (.dmg)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-macos-arm64.dmg)** | Unsigned — right-click the app → **Open**. Intel Macs: build from source ([INSTALL.md](INSTALL.md)) |
+| 🍎 **macOS** (Apple Silicon) | **[Disk image (.dmg)](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-macos-arm64.dmg)** | Signed & notarized (Developer ID: **Trenton Von Holten**) — opens like any Mac app. Intel Macs: build from source ([INSTALL.md](INSTALL.md)) |
 | 🐧 **Linux** | **[Flatpak bundle](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp.flatpak)** | `flatpak install --user EasyAmp.flatpak` |
 
 > Everything is bundled — no Python or GTK install required. To build from source instead, see below.
