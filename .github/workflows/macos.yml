@@ -61,16 +61,77 @@ jobs:
           GTK3_HITS=$(find "$APP" -iname 'libgtk-3*' -o -iname 'libgdk-3*' -o -iname 'Gtk-3.0.typelib' -o -iname 'Gdk-3.0.typelib')
           if [ -n "$GTK3_HITS" ]; then echo "ERROR: GTK3 leaked into the bundle:"; echo "$GTK3_HITS"; exit 1; fi
 
-      - name: Ad-hoc code-sign the .app
+      # Forks have no signing identity — a deep ad-hoc re-sign keeps the app
+      # launchable on Apple Silicon (PyInstaller's load-path rewrites break
+      # the original signatures; users clear Gatekeeper once).
+      - name: Ad-hoc code-sign the .app (forks)
+        if: github.repository != 'VonHoltenCodes/EasyAmp'
         run: |
-          # PyInstaller rewrites the bundled dylibs' load paths, which
-          # invalidates their signatures; on Apple Silicon the OS then kills
-          # the app at launch. A deep ad-hoc re-sign makes it launchable
-          # without a paid Developer ID (users still clear Gatekeeper once).
           APP=packaging/macos/dist/EasyAmp.app
           codesign --remove-signature "$APP" 2>/dev/null || true
           codesign --force --deep --sign - --timestamp=none "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP" || true
+
+      # Canonical repo: Developer ID signing + notarization, same approach as
+      # SlowBooks' packaging/macos/release.py (throwaway keychain, inside-out
+      # per-Mach-O signing, notarize + staple the DMG).
+      - name: Import Developer ID certificate into a throwaway keychain
+        if: github.repository == 'VonHoltenCodes/EasyAmp'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$MACOS_CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Allow codesign to use the key without a UI prompt.
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          # Make the throwaway keychain the default so both codesign's
+          # identity search and notarytool's credential profile land in it.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security default-keychain -s "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Developer ID sign the .app
+        if: github.repository == 'VonHoltenCodes/EasyAmp'
+        run: |
+          set -euo pipefail
+          APP=packaging/macos/dist/EasyAmp.app
+          IDENTITY="Developer ID Application: Trenton Von Holten (A98UX34Y88)"
+          # PyInstaller cross-links binaries back into Resources; Apple's
+          # notarization preflight follows those links and rejects the
+          # apparent Mach-O files in Resources. Hosted runners can also add
+          # Finder xattrs that break strict verification.
+          python3 packaging/macos/prepare_bundle.py "$APP"
+          find "$APP" -exec xattr -c {} +
+          # Sign every Mach-O deepest-first: hardened runtime + secure
+          # timestamp on executables, timestamp only on libraries.
+          find "$APP" -type f | awk -F/ '{ print NF "\t" $0 }' | sort -rn | cut -f2- | \
+          while IFS= read -r f; do
+            case "$(file -b "$f")" in
+              *Mach-O*executable*)
+                codesign --force --timestamp --options runtime --sign "$IDENTITY" "$f" ;;
+              *Mach-O*)
+                codesign --force --timestamp --sign "$IDENTITY" "$f" ;;
+            esac
+          done
+          # Nested code directories, then the app itself.
+          find "$APP" -type d \( -name '*.framework' -o -name '*.bundle' \
+              -o -name '*.plugin' -o -name '*.xpc' -o -name '*.appex' \) | \
+            awk -F/ '{ print NF "\t" $0 }' | sort -rn | cut -f2- | \
+          while IFS= read -r d; do
+            codesign --force --timestamp --options runtime --sign "$IDENTITY" "$d"
+          done
+          codesign --force --timestamp --options runtime --sign "$IDENTITY" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Package the .dmg
         run: |
@@ -83,6 +144,40 @@ jobs:
             "EasyAmp-macos-arm64.dmg" \
             "packaging/macos/dist/EasyAmp.app" || \
           create-dmg "EasyAmp-macos-arm64.dmg" "packaging/macos/dist/EasyAmp.app"
+
+      - name: Sign, notarize, and staple the DMG
+        if: github.repository == 'VonHoltenCodes/EasyAmp'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          IDENTITY="Developer ID Application: Trenton Von Holten (A98UX34Y88)"
+          codesign --force --timestamp --sign "$IDENTITY" EasyAmp-macos-arm64.dmg
+          xcrun notarytool store-credentials easyamp-notary \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD"
+          xcrun notarytool submit EasyAmp-macos-arm64.dmg \
+            --keychain-profile easyamp-notary --wait \
+            --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          # notarytool can exit 0 on an Invalid verdict — check, and surface
+          # Apple's per-file log on failure since it's the only way to debug.
+          STATUS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status',''))" "$RUNNER_TEMP/notary.json")
+          if [ "$STATUS" != "Accepted" ]; then
+            SUBMISSION_ID=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('id',''))" "$RUNNER_TEMP/notary.json")
+            [ -n "$SUBMISSION_ID" ] && xcrun notarytool log "$SUBMISSION_ID" --keychain-profile easyamp-notary || true
+            echo "Notarization verdict: ${STATUS:-unknown}" >&2
+            exit 1
+          fi
+          xcrun stapler staple -v EasyAmp-macos-arm64.dmg
+          xcrun stapler validate -v EasyAmp-macos-arm64.dmg
+
+      - name: Delete throwaway keychain
+        if: always() && github.repository == 'VonHoltenCodes/EasyAmp'
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
