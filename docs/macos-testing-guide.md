@@ -22,31 +22,23 @@ Option B (build from source) is the fallback if the prebuilt one won't run.
 
 Download the `.dmg` directly (no GitHub account needed):
 
-**https://github.com/VonHoltenCodes/EasyAmp/releases/download/v0.3.3/EasyAmp-macos-arm64.dmg**
+**https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp-macos-arm64.dmg**
 
 (~125 MB. Or browse all downloads at
-https://github.com/VonHoltenCodes/EasyAmp/releases/tag/v0.3.3)
+https://github.com/VonHoltenCodes/EasyAmp/releases/latest)
 
 ### 2. Install
 
 1. Double-click the `.dmg` to mount it.
 2. Drag **EasyAmp.app** into your **Applications** folder.
 
-### 3. First launch (important — the app is unsigned)
+### 3. First launch
 
-Because I'm not paying for an Apple Developer signing certificate yet, macOS
-Gatekeeper will block the first launch. This is expected. Do **one** of these:
-
-- **Easy way:** Right-click (or Control-click) **EasyAmp.app** → **Open** →
-  in the dialog click **Open** again. You only have to do this once.
-- **If that's still blocked** (newer macOS), open **Terminal** and run:
-  ```bash
-  xattr -dr com.apple.quarantine /Applications/EasyAmp.app
-  ```
-  then open it normally.
-
-If you see *"EasyAmp is damaged and can't be opened"* — that's also just
-Gatekeeper on an unsigned app; the `xattr` command above clears it.
+The app is **signed and notarized** (Developer ID: Trenton Von Holten), so it
+opens like any other Mac app — no Gatekeeper warnings, no right-click dance.
+If macOS *does* complain about the publisher or say the app is damaged, that's
+a bug in the release pipeline: please stop and report it (screenshot of the
+dialog + your macOS version).
 
 ---
 
@@ -72,20 +64,12 @@ If `easyamp` isn't found on PATH, run it directly: `python3 -m easyamp.app`.
 
 ---
 
-## About the visualizer (please read)
+## About the visualizer
 
-The **spectrum bars and VU meters** display *live system audio*. macOS has no
-built-in way to capture its own output, so:
-
-- **Playback and the 10-band EQ work fine without anything extra.**
-- To make the **visualizer actually move**, you need a loopback audio device.
-  Install **[BlackHole (2ch)](https://github.com/ExistentialAudio/BlackHole)**
-  (free), then set it (or a Multi-Output device that includes it) as the
-  system **output**. Without it, the meters will just sit at zero — that's
-  expected, not a bug.
-
-It's fine to test *without* BlackHole — just note in your feedback that the
-meters were flat because you didn't set up loopback.
+Since v0.5.2 the **spectrum bars and VU meters** feed from EasyAmp's own
+playback audio — **no loopback device (BlackHole) is needed**. The meters
+should move whenever a track is playing. If they sit at zero during playback,
+that's a bug — please report it.
 
 ---
 
@@ -104,7 +88,7 @@ meters were flat because you didn't set up loopback.
 - [ ] EQ presets load (dropdown / preset list)
 - [ ] The **ON** button toggles the EQ on/off (audible difference)
 
-**Visualizers** (set up BlackHole first if you want these to move)
+**Visualizers**
 - [ ] **Spectrum** bars react to music
 - [ ] **VU** button switches to the analog-style VU needles (atomic green)
 - [ ] The small scope in the timer area animates

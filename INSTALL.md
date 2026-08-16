@@ -39,8 +39,9 @@ sudo pacman -S python-gobject gtk4 gstreamer gst-plugins-base gst-plugins-good \
     pipewire-pulse python-numpy
 ```
 
-> The visualizer captures the system output via GStreamer's `pulsesrc`
-> (`gstreamer1.0-pulseaudio`), so it reflects everything playing.
+> The visualizer taps the player's own audio (since v0.5.2), so the meters
+> work with no extra setup. `gstreamer1.0-pulseaudio` still handles playback
+> output (and the legacy system-capture fallback).
 
 ### 2. Install EasyAmp
 
@@ -70,10 +71,9 @@ install -Dm644 data/easyamp.desktop ~/.local/share/applications/easyamp.desktop
 
 ## macOS
 
-> **Caveat:** the **visualizer** needs a system-audio capture source; macOS has
-> none built in, so install a loopback device such as
-> [BlackHole](https://github.com/ExistentialAudio/BlackHole) to feed the meters.
-> Playback + the built-in EQ work without it.
+> The prebuilt `.dmg` is **signed & notarized** (Developer ID: Trenton Von
+> Holten) — it opens like any Mac app. Since v0.5.2 the visualizer feeds from
+> the player's own audio, so **no loopback device (BlackHole) is needed**.
 
 ### 1. System prerequisites (Homebrew)
 
@@ -94,11 +94,9 @@ easyamp
 
 ## Windows
 
-> Most users should just grab the **[installer or portable zip](https://github.com/VonHoltenCodes/EasyAmp/releases/latest)**.
-> The steps here are for running from source.
->
-> Unlike macOS, the visualizer works out of the box: it captures the system
-> output via **WASAPI loopback**, so no extra loopback device is needed.
+> Most users should just grab the **[installer or portable zip](https://github.com/VonHoltenCodes/EasyAmp/releases/latest)**
+> (code-signed via Azure Trusted Signing). The steps here are for running from
+> source.
 
 GTK4 for Windows comes from **[MSYS2](https://www.msys2.org/)**. Run the
 following in an **MSYS2 MINGW64** shell (not the plain MSYS or UCRT shell):
@@ -113,8 +111,9 @@ pacman -S mingw-w64-x86_64-gtk4 mingw-w64-x86_64-python-gobject \
     mingw-w64-x86_64-python-numpy mingw-w64-x86_64-python-pip
 ```
 
-> `gst-plugins-bad` provides the `wasapi2` element used for system-audio
-> capture; `adwaita-icon-theme` supplies GTK's stock icons.
+> `gst-plugins-bad` provides the `pitch` element (cassette varispeed) and the
+> `wasapi2` fallback capture source; `adwaita-icon-theme` supplies GTK's stock
+> icons.
 
 ### 2. Install EasyAmp
 
@@ -159,13 +158,15 @@ flatpak-builder --user --install --force-clean build-dir com.vonholtencodes.Easy
 flatpak run com.vonholtencodes.EasyAmp
 ```
 
-Audio (playback + the visualizer's monitor capture) goes through the
+Audio playback (and the legacy system-capture fallback) goes through the
 `--socket=pulseaudio` permission; files open via the file-chooser portal
 (plus read-only `~/Music`).
 
 ## Packaging status
 
-- **Windows:** ✅ Inno Setup installer + portable zip (PyInstaller, MSYS2).
-- **macOS:** ✅ self-contained `.app`/`.dmg` (PyInstaller). The visualizer still
-  needs a loopback device (e.g. BlackHole) since macOS has no output monitor.
-- **Linux:** ✅ Flatpak bundle on the releases page; Flathub submission in review.
+- **Windows:** ✅ Inno Setup installer + portable zip (PyInstaller, MSYS2),
+  code-signed via Azure Trusted Signing.
+- **macOS:** ✅ self-contained `.app`/`.dmg` (PyInstaller), Developer ID
+  signed & notarized.
+- **Linux:** ✅ Flatpak bundle on the releases page + self-hosted repo at
+  [dl.easyampstereo.com](https://dl.easyampstereo.com).
