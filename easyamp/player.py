@@ -33,6 +33,7 @@ from .eqmodel import (  # noqa: E402
     DEFAULT_Q, GRAPHIC_NBANDS, PEAK, LOW_SHELF, HIGH_SHELF,
     MIN_BANDS, MAX_BANDS, band_freqs, interp,
 )
+from . import __version__  # noqa: E402
 
 Gst.init(None)
 
@@ -58,17 +59,22 @@ def make_element(factory, name=None):
 
 
 class Player:
-    def __init__(self, on_tags=None, on_eos=None, on_state=None, on_error=None):
+    def __init__(self, on_tags=None, on_eos=None, on_state=None, on_error=None,
+                 on_buffering=None):
         self.on_tags = on_tags
         self.on_eos = on_eos
         self.on_state = on_state
         self.on_error = on_error
+        self.on_buffering = on_buffering   # on_buffering(pct) / (None) = done
         self._uri: str | None = None
+        self._headers: dict | None = None  # extra HTTP headers for net streams
         self._bitrate = 0
         self._nbands = GRAPHIC_NBANDS
         self._bands: list[list] = []
         self._gen = 0               # bumped per load(); guards stale errors
         self._error_reported = False
+        self._want_playing = False  # user intent, survives buffering pauses
+        self._buffering = False
 
         self.viz_sink = None        # appsink tapping our own output, or None
         self.playbin = make_element("playbin", "easyamp-player")
@@ -81,11 +87,14 @@ class Player:
         if sink is not None:
             self.playbin.set_property("audio-sink", sink)
 
+        self.playbin.connect("source-setup", self._on_source_setup)
+
         bus = self.playbin.get_bus()
         bus.add_signal_watch()
         bus.connect("message::tag", self._on_tag)
         bus.connect("message::eos", self._on_eos)
         bus.connect("message::error", self._on_error)
+        bus.connect("message::buffering", self._on_buffering_msg)
 
     # ---- pipeline construction ---------------------------------------
     def _build_eqbin(self) -> Gst.Bin:
@@ -218,29 +227,45 @@ class Player:
             self._bands.append([float(f), float(q), 0.0, btype])
 
     # ---- transport ----------------------------------------------------
-    def load(self, path_or_uri: str) -> None:
+    def load(self, path_or_uri: str, headers: dict | None = None) -> None:
         uri = path_or_uri if "://" in path_or_uri else \
             Gst.filename_to_uri(os.path.abspath(path_or_uri))
         self.stop()
         self._gen += 1
         self._error_reported = False
+        self._buffering = False
         self._uri = uri
+        self._headers = headers
+        # give network streams a small pre-buffer; local files keep the default
+        is_net = not uri.startswith("file://")
+        self.playbin.set_property("buffer-duration",
+                                  3 * Gst.SECOND if is_net else -1)
         self.playbin.set_property("uri", uri)
 
     def play(self) -> None:
-        self.playbin.set_state(Gst.State.PLAYING)
+        self._want_playing = True
+        if not self._buffering:      # mid-buffer: resume happens at 100%
+            self.playbin.set_state(Gst.State.PLAYING)
 
     def pause(self) -> None:
+        self._want_playing = False
         self.playbin.set_state(Gst.State.PAUSED)
 
     def stop(self) -> None:
+        self._want_playing = False
+        self._buffering = False
         self.playbin.set_state(Gst.State.NULL)
 
     def is_playing(self) -> bool:
         return self.playbin.get_state(0)[1] == Gst.State.PLAYING
 
+    def intended_playing(self) -> bool:
+        """is_playing(), but honest during a buffering pause (the pipeline
+        sits in PAUSED while the user's intent is still 'playing')."""
+        return self._want_playing if self._buffering else self.is_playing()
+
     def toggle(self) -> None:
-        self.pause() if self.is_playing() else self.play()
+        self.pause() if self.intended_playing() else self.play()
 
     # ---- position / seek ---------------------------------------------
     def position(self) -> int:
@@ -390,6 +415,40 @@ class Player:
         return info
 
     # ---- bus callbacks ------------------------------------------------
+    def _on_source_setup(self, _playbin, src) -> None:
+        """Configure the HTTP source (souphttpsrc) for streaming: identify
+        ourselves, and attach any per-track auth headers (Bearer etc.)."""
+        if src.find_property("user-agent") is not None:
+            src.set_property("user-agent", f"EasyAmp/{__version__}")
+        if self._headers and src.find_property("extra-headers") is not None:
+            s = Gst.Structure.new_empty("extra-headers")
+            for k, v in self._headers.items():
+                s.set_value(k, str(v))
+            src.set_property("extra-headers", s)
+
+    def _on_buffering_msg(self, _bus, msg) -> None:
+        # live streams (radio) must never be pause-buffered
+        try:
+            if msg.parse_buffering_stats()[0] == Gst.BufferingMode.LIVE:
+                return
+        except Exception:
+            pass
+        # defer to the main loop: set_state() inside a bus callback deadlocks
+        GLib.idle_add(self._apply_buffering, msg.parse_buffering(), self._gen)
+
+    def _apply_buffering(self, pct: int, gen: int) -> bool:
+        if gen != self._gen:
+            return False            # stale message from a previous track
+        self._buffering = pct < 100
+        if self._buffering:
+            if self.is_playing():
+                self.playbin.set_state(Gst.State.PAUSED)
+        elif self._want_playing:
+            self.playbin.set_state(Gst.State.PLAYING)
+        if self.on_buffering:
+            self.on_buffering(pct if self._buffering else None)
+        return False
+
     def _on_tag(self, _bus, msg) -> None:
         if not self.on_tags:
             return

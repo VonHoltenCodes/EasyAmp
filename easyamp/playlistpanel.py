@@ -1,8 +1,10 @@
-"""Playlist panel: a green-on-black numbered track list with file actions."""
+"""Playlist panel: a green-on-black numbered track list with file actions.
+
+Rows are :class:`~easyamp.sources.base.Track` objects (local files and
+remote/source-bound tracks alike); the file dialogs wrap picked paths with
+``Track.local`` so every callback traffics in Tracks."""
 
 from __future__ import annotations
-
-import os
 
 import gi
 
@@ -10,6 +12,8 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gio, GLib  # noqa: E402
 
 from .widgets import panel_bar  # noqa: E402
+from .sources.base import Track  # noqa: E402
+from . import m3u  # noqa: E402
 
 AUDIO_PATTERNS = ("*.mp3", "*.flac", "*.wav", "*.ogg", "*.opus",
                   "*.m4a", "*.aac", "*.wma", "*.mp4")
@@ -23,7 +27,7 @@ class PlaylistPanel(Gtk.Box):
         self.on_replace = on_replace
         self.on_remove = on_remove
         self.on_clear = on_clear
-        self._tracks: list[str] = []
+        self._tracks: list[Track] = []
         self._current = -1
 
         self.append(panel_bar("EASYAMP PLAYLIST"))
@@ -69,40 +73,59 @@ class PlaylistPanel(Gtk.Box):
         return b
 
     # ---- display ------------------------------------------------------
-    def set_tracks(self, paths: list[str]) -> None:
-        self._tracks = list(paths)
+    def set_tracks(self, tracks: list[Track]) -> None:
+        """Rebuild the row list. Rows are appended in idle-sized chunks so a
+        huge playlist (a full-library Plex playlist can be thousands of
+        tracks) never freezes the UI thread."""
+        self._tracks = list(tracks)
+        self._build_gen = getattr(self, "_build_gen", 0) + 1
+        gen = self._build_gen
         child = self.listbox.get_first_child()
         while child:
             nxt = child.get_next_sibling()
             self.listbox.remove(child)
             child = nxt
-        for i, path in enumerate(self._tracks):
-            name = os.path.splitext(os.path.basename(path))[0]
-            lbl = Gtk.Label(label=f"{i + 1}. {name}", xalign=0)
-            lbl.add_css_class("eaa-track")
-            lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
-            row = Gtk.ListBoxRow()
-            row.set_child(lbl)
-            self.listbox.append(row)
-        self.set_current(self._current)
+        cur = self._current
+        self._current = -1
+        it = iter(enumerate(self._tracks))
+
+        def add_chunk():
+            if gen != self._build_gen:
+                return False        # a newer rebuild superseded this one
+            for _ in range(150):
+                try:
+                    i, track = next(it)
+                except StopIteration:
+                    self.set_current(cur)
+                    return False
+                lbl = Gtk.Label(label=f"{i + 1}. {track.display()}", xalign=0)
+                lbl.add_css_class("eaa-track")
+                lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+                row = Gtk.ListBoxRow()
+                row.set_child(lbl)
+                self.listbox.append(row)
+            return True             # more rows: continue on the next idle
+
+        # build the first screenful synchronously so short lists still
+        # appear instantly, then hand off to idle chunks
+        if add_chunk():
+            GLib.idle_add(add_chunk)
 
     def set_current(self, idx: int) -> None:
+        # touch only the old and new rows — walking every row is O(n) per
+        # track change and crawls on thousand-row playlists
+        old = self._current
         self._current = idx
-        i = 0
-        row = self.listbox.get_first_child()
-        while row:
-            lbl = row.get_child()
-            if lbl:
-                if i == idx:
-                    lbl.add_css_class("current")
-                else:
-                    lbl.remove_css_class("current")
-            i += 1
-            row = row.get_next_sibling()
-        if 0 <= idx:
-            target = self.listbox.get_row_at_index(idx)
-            if target:
-                self.listbox.select_row(target)
+        if old >= 0 and old != idx:
+            row = self.listbox.get_row_at_index(old)
+            if row and row.get_child():
+                row.get_child().remove_css_class("current")
+        if idx >= 0:
+            row = self.listbox.get_row_at_index(idx)
+            if row:
+                if row.get_child():
+                    row.get_child().add_css_class("current")
+                self.listbox.select_row(row)
 
     # ---- handlers -----------------------------------------------------
     def _on_row_activated(self, _lb, row):
@@ -139,7 +162,7 @@ class PlaylistPanel(Gtk.Box):
             except GLib.Error:
                 return
             paths = [files.get_item(i).get_path() for i in range(files.get_n_items())]
-            cb([p for p in paths if p])
+            cb([Track.local(p) for p in paths if p])
 
         dialog.open_multiple(self.get_root(), None, done)
 
@@ -161,15 +184,11 @@ class PlaylistPanel(Gtk.Box):
             path = f.get_path()
             if not path:
                 return
-            base = os.path.dirname(path)
-            out = []
-            with open(path, encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    out.append(line if os.path.isabs(line) else os.path.join(base, line))
-            self.on_replace(out)
+            try:
+                tracks = m3u.parse(path)
+            except OSError:
+                return
+            self.on_replace(tracks)
 
         dialog.open(self.get_root(), None, done)
 
@@ -185,8 +204,6 @@ class PlaylistPanel(Gtk.Box):
             path = f.get_path()
             if path:
                 with open(path, "w", encoding="utf-8") as fh:
-                    fh.write("#EXTM3U\n")
-                    for t in self._tracks:
-                        fh.write(t + "\n")
+                    fh.write(m3u.serialize(self._tracks))
 
         dialog.save(self.get_root(), None, done)

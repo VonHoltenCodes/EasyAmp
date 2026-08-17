@@ -9,7 +9,7 @@ together. All drawing lives in ``viz.py`` / ``widgets.py``.
 
 from __future__ import annotations
 
-import os
+import threading
 
 import gi
 
@@ -21,6 +21,9 @@ from .player import Player  # noqa: E402
 from .eqpanel import EQPanel  # noqa: E402
 from .eqview import EQView  # noqa: E402
 from .playlistpanel import PlaylistPanel, AUDIO_PATTERNS  # noqa: E402
+from .sourcesview import SourcesView  # noqa: E402
+from .sources import registry  # noqa: E402
+from .sources.base import Track  # noqa: E402
 from .viz import ScopeArea, SpectrumVU  # noqa: E402
 from .widgets import (  # noqa: E402
     Marquee, MARQUEE_WIDTH, window_title_bar, make_button, set_led,
@@ -41,10 +44,12 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="EasyAmp")
         self.player = Player(on_tags=self._on_tags, on_eos=self._on_eos,
-                             on_error=self._on_play_error)
-        self.playlist: list[str] = []
+                             on_error=self._on_play_error,
+                             on_buffering=self._on_buffering)
+        self.playlist: list[Track] = []
         self.track = -1
         self._playing = False
+        self._auth_retried = False   # one silent re-auth retry per play attempt
 
         self.add_css_class("easyamp")
         self.set_resizable(True)
@@ -174,6 +179,10 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.eqview = EQView(self)
         self.stack.add_named(self.eqview, "equalizer")
 
+        # streaming sources view (third stack page)
+        self.sourcesview = SourcesView(self)
+        self.stack.add_named(self.sourcesview, "sources")
+
     # ---- tiny builders ------------------------------------------------
     @staticmethod
     def _mk(widget, *classes):
@@ -197,9 +206,12 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
 
         self.tab_player = Gtk.ToggleButton(label="PLAYER")
         self.tab_eq = Gtk.ToggleButton(label="EQUALIZER")
+        self.tab_src = Gtk.ToggleButton(label="SOURCES")
         self.tab_eq.set_group(self.tab_player)
+        self.tab_src.set_group(self.tab_player)
         self.tab_player.set_active(True)
-        for t, name in ((self.tab_player, "player"), (self.tab_eq, "equalizer")):
+        for t, name in ((self.tab_player, "player"), (self.tab_eq, "equalizer"),
+                        (self.tab_src, "sources")):
             t.add_css_class("eaa-tab")
             t.set_can_focus(False)
             t.connect("toggled", self._on_tab, name)
@@ -221,6 +233,8 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
             self.stack.set_visible_child_name(name)
             if name == "equalizer" and getattr(self, "eqview", None):
                 self.eqview.refresh()
+            elif name == "sources" and getattr(self, "sourcesview", None):
+                self.sourcesview.refresh()
 
     def _on_footer_clicked(self, _b):
         if not self._update_url:
@@ -284,6 +298,19 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.track = -1
         self.playlist_panel.set_tracks([])
 
+    def enqueue_tracks(self, tracks, play_now=False, replace=False):
+        """Entry point for the SOURCES page: append (or replace with) a batch
+        of tracks, optionally starting playback."""
+        if not tracks:
+            return
+        if replace:
+            self._pl_replace(list(tracks))   # plays the first track itself
+            return
+        start = len(self.playlist)
+        self._pl_add(list(tracks))
+        if play_now:
+            self._play_track(start)
+
     # ---- player -------------------------------------------------------
     def on_open(self, _b):
         dialog = Gtk.FileDialog(title="Open audio")
@@ -302,24 +329,33 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         except GLib.Error:
             return
         paths = [files.get_item(i).get_path() for i in range(files.get_n_items())]
-        paths = [p for p in paths if p]
-        if paths:
-            self._pl_replace(paths)
+        tracks = [Track.local(p) for p in paths if p]
+        if tracks:
+            self._pl_replace(tracks)
 
-    def _play_track(self, idx):
+    def _play_track(self, idx, _is_retry=False):
         if not (0 <= idx < len(self.playlist)):
             return
+        if not _is_retry:
+            self._auth_retried = False
         self.track = idx
-        path = self.playlist[idx]
-        self.player.load(path)
+        track = self.playlist[idx]
+        headers = None
+        uri = track.uri
+        if track.source_id:
+            src = registry.get(track.source_id)
+            if src is None:
+                self._on_play_error("source not configured")
+                return
+            uri, headers = src.stream_uri(track)
+        self.player.load(uri, headers=headers)
         self.player.play()
         self._playing = True
         self._set_state("PLAY")
         self.btn_play.icon.set_kind("pause")
-        track_name = os.path.splitext(os.path.basename(path))[0]
-        self.marquee.set_text(track_name)
+        self.marquee.set_text(track.display())
         if getattr(self, "eqview", None):
-            self.eqview.set_track(track_name)
+            self.eqview.set_track(track.display())
         self.playlist_panel.set_current(idx)
 
     def on_playpause(self, _b):
@@ -328,7 +364,7 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
                 self._play_track(0)
             return
         self.player.toggle()
-        self._playing = self.player.is_playing()
+        self._playing = self.player.intended_playing()
         self.btn_play.icon.set_kind("pause" if self._playing else "play")
         self._set_state("PLAY" if self._playing else "PAUSE")
 
@@ -356,13 +392,58 @@ class EasyAmpWindow(Gtk.ApplicationWindow):
         self.on_next(None)
 
     def _on_play_error(self, message):
-        """A track failed to load/decode: stop and report, never auto-advance."""
+        """A track failed to load/decode: stop and report, never auto-advance.
+        For source-bound tracks, first try one silent re-auth + retry (the
+        server may have moved or the token may have been revoked)."""
+        track = (self.playlist[self.track]
+                 if 0 <= self.track < len(self.playlist) else None)
+        if (track is not None and track.source_id and not self._auth_retried):
+            self._auth_retried = True
+            self._retry_source_track(self.track, track)
+            return
         self._playing = False
         self.btn_play.icon.set_kind("play")
         self._set_state("STOP")
         self.marquee.set_text("LOAD ERROR")
         if getattr(self, "eqview", None):
             self.eqview.set_track("LOAD ERROR")
+
+    def _retry_source_track(self, idx, track):
+        """Worker thread: refresh the source session, re-resolve the track's
+        URI, then retry playback once on the main loop."""
+        self.marquee.set_text("RECONNECTING…")
+        src = registry.get(track.source_id)
+
+        def worker():
+            fixed = None
+            if src is not None and src.refresh_auth():
+                try:
+                    fixed = src.resolve(track)
+                except Exception:
+                    fixed = track
+            GLib.idle_add(self._retry_done, idx, fixed)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _retry_done(self, idx, fixed):
+        # the user may have moved on while we reconnected
+        if idx != self.track or idx >= len(self.playlist):
+            return False
+        if fixed is None:
+            self._on_play_error("reconnect failed")
+            return False
+        self.playlist[idx] = fixed
+        self.playlist_panel.set_tracks(self.playlist)
+        self._play_track(idx, _is_retry=True)
+        return False
+
+    def _on_buffering(self, pct):
+        """Player buffering callback: pct while filling, None when done."""
+        if pct is not None:
+            self.ind_state.set_text("BUFF")
+        else:
+            self._set_state("PLAY" if self.player.intended_playing()
+                            else "PAUSE")
 
     def _on_tags(self, info):
         artist, title = info.get("artist", ""), info.get("title", "")
