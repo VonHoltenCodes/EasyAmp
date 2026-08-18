@@ -141,7 +141,11 @@ jobs:
           # (a bundle that passed here crashed on two real Win11 machines).
           rc=0
           SYSDIR="$(cygpath -u "$SYSTEMROOT")"
-          PATH="$SYSDIR/System32:$SYSDIR" EASYAMP_SMOKETEST=1 timeout 180 ./EasyAmp.exe || rc=$?
+          # absolute paths for the harness tools: with PATH stripped, bare
+          # `timeout` resolves to Windows' unrelated TIMEOUT.EXE
+          /usr/bin/timeout 180 /usr/bin/env \
+            PATH="$SYSDIR/System32:$SYSDIR" EASYAMP_SMOKETEST=1 \
+            ./EasyAmp.exe || rc=$?
           echo "smoketest exit code: $rc"
           cat smoketest.log 2>/dev/null || echo "(no smoketest.log written)"
           rm -f smoketest.log
