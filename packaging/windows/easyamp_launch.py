@@ -62,6 +62,33 @@ try:
 except Exception:
     pass
 
+# CI smoke test: importing easyamp.window exercises the entire native stack
+# (gi/GTK typelib+override load, Gst.init's plugin scan, every app module)
+# without needing a display. All three 0.6.0-rc launch crashes (missing
+# subpackage, GGML DLL abort, gi override AssertionError) happened right
+# here at import time — this catches that class of breakage on the runner
+# instead of on a user's desktop. Exit code + smoketest.log carry the
+# verdict because a windowed exe has no usable stdout.
+if os.environ.get("EASYAMP_SMOKETEST"):
+    try:
+        import pyi_splash  # noqa: F811
+        pyi_splash.close()
+    except Exception:
+        pass
+    try:
+        import easyamp.window  # noqa: F401
+        import easyamp.sourcesview  # noqa: F401
+        with open(os.path.join(os.path.dirname(sys.executable),
+                               "smoketest.log"), "w", encoding="utf-8") as fh:
+            fh.write("SMOKETEST OK\n")
+        sys.exit(0)
+    except BaseException:
+        import traceback
+        with open(os.path.join(os.path.dirname(sys.executable),
+                               "smoketest.log"), "w", encoding="utf-8") as fh:
+            traceback.print_exc(file=fh)
+        sys.exit(1)
+
 from easyamp.app import main  # noqa: E402 — must follow the runtime setup above
 
 sys.exit(main())
