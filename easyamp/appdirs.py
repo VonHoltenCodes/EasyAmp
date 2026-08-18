@@ -24,3 +24,27 @@ def config_dir() -> str:
     path = os.path.join(base, "easyamp")
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def ensure_private_gst_registry() -> str | None:
+    """Frozen macOS bundles only: point GStreamer's plugin-registry cache
+    at a per-user cache dir BEFORE anything imports Gst.
+
+    Without this, GStreamer writes ``registry.bin`` next to its bundled
+    plugins — inside the sealed, notarized .app — which invalidates the
+    code signature after first launch (issue #4, diagnosed by
+    @ContractorKeith: ``codesign --verify`` fails with "a sealed resource
+    is missing or invalid" until the stray file is deleted).
+
+    Returns the registry path when set; None when not applicable (other
+    platforms, dev runs, or the user already set ``GST_REGISTRY``).
+    """
+    if sys.platform != "darwin" or not getattr(sys, "frozen", False):
+        return None
+    if os.environ.get("GST_REGISTRY"):
+        return None          # explicit user/system override wins
+    cache = os.path.expanduser("~/Library/Caches/easyamp")
+    os.makedirs(cache, exist_ok=True)
+    path = os.path.join(cache, "registry.bin")
+    os.environ["GST_REGISTRY"] = path
+    return path

@@ -29,6 +29,13 @@ def _log_to_file():
 
 _log_to_file()
 
+# Keep GStreamer's registry cache OUT of the sealed .app (issue #4): must
+# run before easyamp.app imports easyamp.player, whose Gst.init triggers
+# the plugin scan that writes the cache. appdirs imports no gi modules,
+# so importing it here is safe.
+from easyamp.appdirs import ensure_private_gst_registry  # noqa: E402
+ensure_private_gst_registry()
+
 from easyamp.app import main  # noqa: E402
 
 sys.exit(main())
