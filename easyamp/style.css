@@ -272,7 +272,8 @@ window.easyamp {
   border: none;
   min-height: 0;
   padding: 2px 12px;
-  color: #5a6a6a;
+  color: #3f7a3f;   /* same dim green as the version indicator — the old
+                       grey was unreadable on the Windows font stack */
   font-family: "Pixelify Sans", monospace;
   font-size: 9px;
   letter-spacing: 1px;
@@ -355,6 +356,11 @@ popover.eaa-pop > contents {
   border: 1px solid #7d8ec0;
 }
 popover.eaa-pop label { color: #b8c0d4; }
+/* the wide label rule above must NOT catch button labels — that made the
+   grey beveled buttons show light-on-grey (unreadable on Windows) */
+popover.eaa-pop button label,
+popover.eaa-pop button { color: #1e1e24; }
+popover.eaa-pop checkbutton label { color: #b8c0d4; }
 popover.eaa-pop entry {
   background-color: #10131f;
   color: #cfe3ff;
