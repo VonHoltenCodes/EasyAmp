@@ -133,6 +133,38 @@ jobs:
           codesign --force --timestamp --options runtime --sign "$IDENTITY" "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
+      - name: Notarize + staple the .app (offline first launch — issue #4)
+        if: github.repository == 'VonHoltenCodes/EasyAmp'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Previously only the DMG was stapled; the .app inside carried no
+          # ticket, so first launch on an offline Mac couldn't be assessed.
+          # Notarize the app on its own, staple it, THEN build the DMG
+          # around the stapled app (the DMG gets its own pass below).
+          xcrun notarytool store-credentials easyamp-notary \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD"
+          APP=packaging/macos/dist/EasyAmp.app
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/EasyAmp-app.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/EasyAmp-app.zip" \
+            --keychain-profile easyamp-notary --wait \
+            --output-format json > "$RUNNER_TEMP/notary-app.json"
+          cat "$RUNNER_TEMP/notary-app.json"
+          STATUS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status',''))" "$RUNNER_TEMP/notary-app.json")
+          if [ "$STATUS" != "Accepted" ]; then
+            SUBMISSION_ID=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('id',''))" "$RUNNER_TEMP/notary-app.json")
+            [ -n "$SUBMISSION_ID" ] && xcrun notarytool log "$SUBMISSION_ID" --keychain-profile easyamp-notary || true
+            echo "App notarization verdict: ${STATUS:-unknown}" >&2
+            exit 1
+          fi
+          xcrun stapler staple -v "$APP"
+          xcrun stapler validate -v "$APP"
+
       - name: Package the .dmg
         run: |
           create-dmg \
@@ -155,10 +187,7 @@ jobs:
           set -euo pipefail
           IDENTITY="Developer ID Application: Trenton Von Holten (A98UX34Y88)"
           codesign --force --timestamp --sign "$IDENTITY" EasyAmp-macos-arm64.dmg
-          xcrun notarytool store-credentials easyamp-notary \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD"
+          # credentials profile already stored by the app-notarization step
           xcrun notarytool submit EasyAmp-macos-arm64.dmg \
             --keychain-profile easyamp-notary --wait \
             --output-format json > "$RUNNER_TEMP/notary.json"
