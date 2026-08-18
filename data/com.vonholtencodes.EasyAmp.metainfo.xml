@@ -43,6 +43,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.6.2" date="2026-08-18">
+      <description>
+        <p>macOS fix: GStreamer no longer writes its plugin cache inside the
+        signed app bundle, which invalidated the code signature after first
+        launch. The app is now also notarization-stapled for offline first
+        launch. Thanks to Keith for the diagnosis and verification.</p>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-08-17">
       <description>
         <p>Streaming sources: link your Plex or Jellyfin server from the new
