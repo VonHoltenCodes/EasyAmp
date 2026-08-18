@@ -118,8 +118,19 @@ _BINARY_DENY_PREFIX = ("avfilter-", "avcodec-", "avformat-", "avutil-",
 def _drop_unused_gst_plugins(toc):
     kept = []
     for name, path, typ in toc:
-        base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-        if base.startswith("libgst") and any(tok in base for tok in _GST_PLUGIN_DENY):
+        norm = name.replace("\\", "/").lower()
+        base = norm.rsplit("/", 1)[-1]
+        # Deny ONLY plugin DLLs (they live in the gst_plugins dir). GStreamer
+        # SUPPORT libraries share the libgst prefix (libgstrtp-1.0-0.dll,
+        # libgstd3d12-1.0-0.dll, ...) and sit in _internal root — and other
+        # things hard-link them: libgtk-4-1.dll itself links gstd3d12 since
+        # GTK 4.22, and libgstisomp4 (m4a/mp4 demux) links gstrtp. Dropping
+        # a support lib doesn't disable a feature, it breaks DLL resolution
+        # for whoever links it — on user machines only, because CI's MSYS2
+        # PATH papers over the hole (the 0.6.0-rc gi AssertionError).
+        in_plugin_dir = "gst_plugins/" in norm
+        if (in_plugin_dir and base.startswith("libgst")
+                and any(tok in base for tok in _GST_PLUGIN_DENY)):
             continue
         if base.startswith(_BINARY_DENY_PREFIX):
             continue
