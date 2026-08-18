@@ -319,6 +319,7 @@ class SourcesView(Gtk.Box):
     # ---- add: Plex PIN link -------------------------------------------
     def _on_add_plex(self, btn) -> None:
         pop = Gtk.Popover()
+        pop.add_css_class("eaa-pop")
         pop.set_parent(btn)
         # the user is about to switch to a browser to approve the code —
         # an autohiding popover would close (and read as "flow gone") the
@@ -442,6 +443,7 @@ class SourcesView(Gtk.Box):
     # ---- add: Jellyfin sign-in ----------------------------------------
     def _on_add_jellyfin(self, btn) -> None:
         pop = Gtk.Popover()
+        pop.add_css_class("eaa-pop")
         pop.set_parent(btn)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         for m in ("top", "bottom", "start", "end"):

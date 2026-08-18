@@ -14,6 +14,7 @@ Browse item ids encode the hierarchy as plain strings:
 from __future__ import annotations
 
 import socket
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -62,7 +63,13 @@ def discover_servers(client_id: str, account_token: str) -> list[dict]:
     """Reachable PMS instances for this account. Each entry:
     ``{name, machine_id, base_url, token}`` — ``token`` is the
     server-specific access token from the resources API, ``base_url`` the
-    fastest reachable connection (LAN preferred)."""
+    fastest reachable connection (LAN preferred).
+
+    Probing is two-pass: the first HTTPS contact on a cold resolver (DNS
+    for *.plex.direct + TLS handshake) can exceed a short timeout on
+    Windows, so a full miss gets one warm retry. If every probe still
+    misses, the best local candidate is returned unprobed — a red status
+    LED and refresh_auth() beat a dead-end "no reachable server"."""
     resources = http_json(
         f"{PLEX_TV}/api/v2/resources?includeHttps=1&includeRelay=0",
         headers=_headers(client_id, account_token), timeout=10)
@@ -73,8 +80,14 @@ def discover_servers(client_id: str, account_token: str) -> list[dict]:
         token = res.get("accessToken") or account_token
         conns = sorted(res.get("connections") or [],
                        key=lambda c: (not c.get("local"), bool(c.get("relay"))))
-        base = next((c["uri"] for c in conns
-                     if _reachable(c.get("uri", ""), token)), None)
+        base = None
+        for _attempt in range(2):
+            base = next((c["uri"] for c in conns
+                         if _reachable(c.get("uri", ""), token)), None)
+            if base:
+                break
+        if not base:
+            base = next((c["uri"] for c in conns if c.get("local")), None)
         if base:
             out.append({"name": res.get("name", "Plex Server"),
                         "machine_id": res.get("clientIdentifier", ""),
@@ -89,8 +102,10 @@ def _reachable(base: str, token: str) -> bool:
         req = urllib.request.Request(
             f"{base}/identity",
             headers={"X-Plex-Token": token, "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=2):
+        with urllib.request.urlopen(req, timeout=5):
             return True
+    except urllib.error.HTTPError:
+        return True         # any HTTP answer (401/403/...) IS reachable
     except (OSError, socket.timeout, Exception):
         return False
 
