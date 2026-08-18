@@ -97,10 +97,22 @@ _GST_PLUGIN_DENY = (
     # AI / cloud / analytics
     "gstanalytics", "gstdeepgram", "gstelevenlabs", "gstdemucs", "gstclaxon",
     "gstonnx", "gsttensor", "gstwhisper", "gstaws", "gsttranscriber",
+    # libav bridge: MSYS2's FFmpeg 8 links libavfilter -> libwhisper -> GGML,
+    # and GGML's DLL init hard-crashes the app at GStreamer's plugin scan
+    # (0x40000015 in ggml-base.dll, seen 2026-08-17). faad+isomp4 keep
+    # AAC/M4A working; the cost is WMA/ALAC decode until FFmpeg is sane again.
+    "gstlibav",
     # subtitles / captions
     "gstsubparse", "gstsubenc", "gstclosedcaption", "gstcccombiner",
     "gstdvbsub", "gstdvdsub", "gstassrender", "gstkate", "gstttml", "gstsami",
 )
+
+
+# FFmpeg's whisper/GGML tail (pulled in by the now-denied gstlibav): GGML
+# crashes on load, and nothing else imports these once gstlibav is gone.
+_BINARY_DENY_PREFIX = ("avfilter-", "avcodec-", "avformat-", "avutil-",
+                       "avdevice-", "swresample-", "swscale-",
+                       "ggml", "libwhisper")
 
 
 def _drop_unused_gst_plugins(toc):
@@ -108,6 +120,8 @@ def _drop_unused_gst_plugins(toc):
     for name, path, typ in toc:
         base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
         if base.startswith("libgst") and any(tok in base for tok in _GST_PLUGIN_DENY):
+            continue
+        if base.startswith(_BINARY_DENY_PREFIX):
             continue
         kept.append((name, path, typ))
     return kept

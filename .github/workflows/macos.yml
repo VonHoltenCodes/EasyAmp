@@ -13,7 +13,7 @@ jobs:
     name: Build macOS .dmg (Apple Silicon)
     runs-on: macos-14   # Apple Silicon. GitHub no longer offers free Intel
     steps:               # (macos-13) runners, so Intel users build from source.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install GTK/GStreamer (Homebrew)
         run: |
@@ -180,7 +180,7 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: EasyAmp-macos-arm64
           path: EasyAmp-macos-arm64.dmg
