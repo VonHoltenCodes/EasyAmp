@@ -24,8 +24,11 @@ Homepage = "https://github.com/VonHoltenCodes/EasyAmp"
 [project.gui-scripts]
 easyamp = "easyamp.app:main"
 
-[tool.setuptools]
-packages = ["easyamp"]
+# find: (not a hardcoded list) so subpackages like easyamp.sources are
+# always included — a flat ["easyamp"] silently dropped easyamp/sources/
+# from the wheel and every frozen build crashed on startup (0.6.0 rc1)
+[tool.setuptools.packages.find]
+include = ["easyamp*"]
 
 [tool.setuptools.package-data]
 easyamp = ["style.css", "fonts/*.ttf", "fonts/*.txt"]
