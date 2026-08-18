@@ -30,6 +30,16 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
 
+; In-place upgrades only OVERWRITE files — Inno never deletes files that the
+; new version no longer ships. A stale DLL surviving in _internal is fatal:
+; GStreamer scans the plugin DIRECTORY at runtime, so an old plugin (with old
+; dependencies) from a previous install gets loaded next to new libraries
+; (seen 2026-08-17: leftover libgstlibav.dll -> stale FFmpeg -> GGML crash on
+; every launch after an upgrade). Wipe the bundle dir before installing; the
+; user's config/tokens live under %APPDATA%/keyring, never in {app}.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 Source: "dist\EasyAmp\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 

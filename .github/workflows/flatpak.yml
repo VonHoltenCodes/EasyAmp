@@ -20,7 +20,7 @@ jobs:
       options: --privileged
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
@@ -31,7 +31,7 @@ jobs:
 
       # Always keep the bundle as a build artifact (handy for PRs / manual runs)
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: EasyAmp-flatpak
           path: EasyAmp.flatpak

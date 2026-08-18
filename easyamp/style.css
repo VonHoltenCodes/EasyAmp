@@ -272,7 +272,8 @@ window.easyamp {
   border: none;
   min-height: 0;
   padding: 2px 12px;
-  color: #5a6a6a;
+  color: #3f7a3f;   /* same dim green as the version indicator — the old
+                       grey was unreadable on the Windows font stack */
   font-family: "Pixelify Sans", monospace;
   font-size: 9px;
   letter-spacing: 1px;
@@ -311,4 +312,57 @@ window.easyamp {
   font-family: "Pixelify Sans", monospace;
   font-size: 9px;
   letter-spacing: 1px;
+}
+
+/* ===== SOURCES page ===== */
+/* account status LED: dark until probed, green ok, red unreachable */
+.eaa-src-led {
+  min-width: 8px; min-height: 8px;
+  background-color: #2a2a0b;
+  border-top: 1px solid #0a0a04; border-left: 1px solid #0a0a04;
+  border-right: 1px solid #3c3c1c; border-bottom: 1px solid #3c3c1c;
+  margin-left: 4px;
+}
+.eaa-src-led.ok  { background-color: #2bff2b; box-shadow: 0 0 5px rgba(43,255,43,0.95); }
+.eaa-src-led.err { background-color: #ff3b2b; box-shadow: 0 0 5px rgba(255,59,43,0.95); }
+
+/* breadcrumb trail over the library browser */
+.eaa-crumb {
+  background-color: #050807;
+  color: #2bff2b;
+  font-family: "Pixelify Sans", monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 3px 6px;
+  border-bottom: 1px solid #090b14;
+}
+
+/* Plex link code: big and legible (alphanumeric — no 7-segment font) */
+.eaa-linkcode {
+  font-family: "Pixelify Sans", monospace;
+  font-size: 30px;
+  color: #2bff2b;
+  text-shadow: 0 0 8px rgba(43,255,43,0.85);
+  letter-spacing: 8px;
+  padding: 4px 0 4px 8px;
+}
+
+/* sources popovers (Plex link / Jellyfin sign-in): force the dark panel
+   look — the OS default theme on Windows renders popovers white */
+popover.eaa-pop > arrow,
+popover.eaa-pop > contents {
+  background-color: #232b4a;
+  color: #b8c0d4;
+  border: 1px solid #7d8ec0;
+}
+popover.eaa-pop label { color: #b8c0d4; }
+/* the wide label rule above must NOT catch button labels — that made the
+   grey beveled buttons show light-on-grey (unreadable on Windows) */
+popover.eaa-pop button label,
+popover.eaa-pop button { color: #1e1e24; }
+popover.eaa-pop checkbutton label { color: #b8c0d4; }
+popover.eaa-pop entry {
+  background-color: #10131f;
+  color: #cfe3ff;
+  border: 1px solid #454f7a;
 }

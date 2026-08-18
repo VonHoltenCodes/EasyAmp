@@ -23,7 +23,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up MSYS2 (MINGW64 GTK4 + GStreamer)
         uses: msys2/setup-msys2@v2
@@ -121,10 +121,35 @@ jobs:
           echo "libgtk dll present: $(find packaging/windows/dist/EasyAmp -iname 'libgtk-4*' | head -1 || echo MISSING)"
           echo "soundtouch (pitch) plugin: $(find packaging/windows/dist/EasyAmp -iname '*soundtouch*' | head -1 || echo MISSING)"
           echo "bundled GStreamer plugins: $(find packaging/windows/dist/EasyAmp -iname 'libgst*.dll' -path '*gst*plugin*' -o -iname 'libgst*.dll' | grep -Ei 'libgst[a-z0-9]+\.dll' | wc -l) (video/network/AI families pruned in the spec)"
-          # sanity: the audio essentials must survive the prune
-          for p in libgstlibav libgstasf libgstisomp4 libgstflac libgstmpg123 libgstwasapi libgstplayback libgsttypefindfunctions; do
+          # sanity: the audio essentials must survive the prune (libav is
+          # deliberately dropped — its FFmpeg links whisper/GGML which
+          # crashes on load; faad covers AAC/M4A)
+          for p in libgstfaad libgstisomp4 libgstflac libgstmpg123 libgstwasapi libgstplayback libgsttypefindfunctions; do
             find packaging/windows/dist/EasyAmp -iname "${p}*.dll" | head -1 | grep -q . || echo "WARN: expected audio plugin ${p} not found"
           done
+
+      - name: Smoke test the frozen bundle (imports the full native stack)
+        run: |
+          cd packaging/windows/dist/EasyAmp
+          # EASYAMP_SMOKETEST makes the launcher import every app module —
+          # gi/GTK overrides, Gst.init's plugin scan — then exit. Catches
+          # import-time crashes (bad MSYS2 snapshot, stale/poison DLLs,
+          # missing subpackages) on the runner instead of a user's desktop.
+          # PATH is stripped to Windows system dirs: with /mingw64/bin on
+          # PATH the runner silently supplies any DLL missing from the
+          # bundle, hiding exactly the class of bug this test exists for
+          # (a bundle that passed here crashed on two real Win11 machines).
+          rc=0
+          SYSDIR="$(cygpath -u "$SYSTEMROOT")"
+          # absolute paths for the harness tools: with PATH stripped, bare
+          # `timeout` resolves to Windows' unrelated TIMEOUT.EXE
+          /usr/bin/timeout 180 /usr/bin/env \
+            PATH="$SYSDIR/System32:$SYSDIR" EASYAMP_SMOKETEST=1 \
+            ./EasyAmp.exe || rc=$?
+          echo "smoketest exit code: $rc"
+          cat smoketest.log 2>/dev/null || echo "(no smoketest.log written)"
+          rm -f smoketest.log
+          exit $rc
 
       # Sign EasyAmp.exe BEFORE zipping so the portable archive contains the
       # signed binary. Azure login uses GitHub OIDC; no client secret stored.
@@ -175,7 +200,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: EasyAmp-windows-x64
           path: |

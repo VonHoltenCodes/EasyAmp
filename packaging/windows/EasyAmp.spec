@@ -97,17 +97,42 @@ _GST_PLUGIN_DENY = (
     # AI / cloud / analytics
     "gstanalytics", "gstdeepgram", "gstelevenlabs", "gstdemucs", "gstclaxon",
     "gstonnx", "gsttensor", "gstwhisper", "gstaws", "gsttranscriber",
+    # libav bridge: MSYS2's FFmpeg 8 links libavfilter -> libwhisper -> GGML,
+    # and GGML's DLL init hard-crashes the app at GStreamer's plugin scan
+    # (0x40000015 in ggml-base.dll, seen 2026-08-17). faad+isomp4 keep
+    # AAC/M4A working; the cost is WMA/ALAC decode until FFmpeg is sane again.
+    "gstlibav",
     # subtitles / captions
     "gstsubparse", "gstsubenc", "gstclosedcaption", "gstcccombiner",
     "gstdvbsub", "gstdvdsub", "gstassrender", "gstkate", "gstttml", "gstsami",
 )
 
 
+# FFmpeg's whisper/GGML tail (pulled in by the now-denied gstlibav): GGML
+# crashes on load, and nothing else imports these once gstlibav is gone.
+_BINARY_DENY_PREFIX = ("avfilter-", "avcodec-", "avformat-", "avutil-",
+                       "avdevice-", "swresample-", "swscale-",
+                       "ggml", "libwhisper")
+
+
 def _drop_unused_gst_plugins(toc):
     kept = []
     for name, path, typ in toc:
-        base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-        if base.startswith("libgst") and any(tok in base for tok in _GST_PLUGIN_DENY):
+        norm = name.replace("\\", "/").lower()
+        base = norm.rsplit("/", 1)[-1]
+        # Deny ONLY plugin DLLs (they live in the gst_plugins dir). GStreamer
+        # SUPPORT libraries share the libgst prefix (libgstrtp-1.0-0.dll,
+        # libgstd3d12-1.0-0.dll, ...) and sit in _internal root — and other
+        # things hard-link them: libgtk-4-1.dll itself links gstd3d12 since
+        # GTK 4.22, and libgstisomp4 (m4a/mp4 demux) links gstrtp. Dropping
+        # a support lib doesn't disable a feature, it breaks DLL resolution
+        # for whoever links it — on user machines only, because CI's MSYS2
+        # PATH papers over the hole (the 0.6.0-rc gi AssertionError).
+        in_plugin_dir = "gst_plugins/" in norm
+        if (in_plugin_dir and base.startswith("libgst")
+                and any(tok in base for tok in _GST_PLUGIN_DENY)):
+            continue
+        if base.startswith(_BINARY_DENY_PREFIX):
             continue
         kept.append((name, path, typ))
     return kept

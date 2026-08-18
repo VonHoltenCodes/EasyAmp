@@ -24,17 +24,43 @@ easyamp/
 ├── presetui.py     # the shared presets popover (list / save-as) used by both EQ surfaces
 ├── eqio.py         # Equalizer APO / AutoEQ GraphicEQ import + export
 ├── playlistpanel.py# playlist (track list + ADD/REM/CLR/LOAD/SAVE, .m3u)
+├── m3u.py          # playlist I/O: EXTINF + #EASYAMP source tags, token-free URLs
+├── sourcesview.py  # SOURCES tab: accounts panel + library browser
+├── sources/        # streaming sources: base (Track/MusicSource), registry,
+│                   #   plex (PIN link + PMS browse), jellyfin (native API)
+├── secrets_store.py# account tokens: libsecret / DPAPI / Keychain, JSON fallback
+├── appdirs.py      # platform-aware config dir (new code; eq presets unchanged)
 ├── update_check.py # polls dl.easyampstereo.com/latest.json, lights the footer badge
 ├── fontload.py     # installs bundled fonts on first run (Linux/macOS)
 ├── style.css       # the skin
 └── fonts/          # bundled DSEG7 + Pixelify Sans (SIL OFL)
 ```
 
-Two window pages sit in a `Gtk.Stack`, switched by the footer tabs:
-**PLAYER** (display, visualizer, transport, docked EQ + playlist panels) and
-**EQUALIZER** (a docked mini player strip + the full parametric EQ). The
-window owns playback state and forwards time/track/state/audio-data updates
-to whichever surfaces display them.
+Three window pages sit in a `Gtk.Stack`, switched by the footer tabs:
+**PLAYER** (display, visualizer, transport, docked EQ + playlist panels),
+**EQUALIZER** (a docked mini player strip + the full parametric EQ), and
+**SOURCES** (streaming accounts + library browser). The window owns playback
+state and forwards time/track/state/audio-data updates to whichever surfaces
+display them.
+
+## Streaming sources
+
+The playlist holds `Track` objects (`sources/base.py`) — local files are
+`Track.local(path)`, remote tracks carry a `source_id`/`item_id` binding to
+a configured account in `sources/`'s registry (`<configdir>/sources.json`;
+tokens live in `secrets_store.py`, never on disk in plaintext). At play
+time the window asks the source for a tokenized stream URL (pure string
+construction — no network on the main loop); `player.py` injects any HTTP
+headers via `playbin::source-setup` and pause-buffers network streams on
+`message::buffering` (live/radio streams are exempt, and a user pause is
+never overridden by the resume-at-100%). A failed source track gets ONE
+silent re-auth + re-resolve retry in a worker thread, then falls into the
+normal LOAD ERROR path — the no-auto-advance rule still applies.
+
+Every source method runs on daemon worker threads with results marshalled
+back via `GLib.idle_add` and a generation counter (`update_check.py`
+pattern); saved `.m3u` files keep remote entries as token-free URLs plus a
+`#EASYAMP:<source>:<item>` comment for rebinding on load.
 
 ## Playback + EQ
 
