@@ -75,19 +75,18 @@ if os.environ.get("EASYAMP_SMOKETEST"):
         pyi_splash.close()
     except Exception:
         pass
+    _log = os.path.join(os.path.dirname(sys.executable), "smoketest.log")
     try:
         import easyamp.window  # noqa: F401
         import easyamp.sourcesview  # noqa: F401
-        with open(os.path.join(os.path.dirname(sys.executable),
-                               "smoketest.log"), "w", encoding="utf-8") as fh:
-            fh.write("SMOKETEST OK\n")
-        sys.exit(0)
-    except BaseException:
+    except BaseException:  # incl. native-triggered SystemExit — log it all
         import traceback
-        with open(os.path.join(os.path.dirname(sys.executable),
-                               "smoketest.log"), "w", encoding="utf-8") as fh:
+        with open(_log, "w", encoding="utf-8") as fh:
             traceback.print_exc(file=fh)
         sys.exit(1)
+    with open(_log, "w", encoding="utf-8") as fh:
+        fh.write("SMOKETEST OK\n")
+    sys.exit(0)
 
 from easyamp.app import main  # noqa: E402 — must follow the runtime setup above
 
