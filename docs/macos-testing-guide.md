@@ -116,3 +116,27 @@ For anything broken or weird, send me:
 Even "it just worked, here's a screenshot" is hugely useful. Thanks! 🙏
 
 — Trenton (VonHoltenCodes)
+
+## In-fleet local signing on Macbase1 (VonHolten fleet)
+
+The VonHolten fleet signs + notarizes EasyAmp macOS builds under the owner's own
+Developer ID on **Macbase1** (M1 Mac mini, `ssh macbase1`) — no CI and no
+borrowed Mac required. Proven 2026-09-04 (.app + .dmg notarized + stapled,
+`spctl` = "Notarized Developer ID").
+
+Full runbook: **`devbase1:~/CLAUDE.md`** → "Local macOS build → sign → notarize on
+Macbase1", and `/Users/macbase1/CLAUDE.md` on the box. In brief: run this repo's
+`.github/workflows/macos.yml` build steps locally (brew `gtk4 pygobject3 gstreamer
+adwaita-icon-theme librsvg create-dmg`, venv off brew `python3`, `pyinstaller …
+EasyAmp.spec`), then Developer-ID sign inside-out and notarize with the shared
+`fleet-signing.keychain-db` identity.
+
+⚠ **EasyAmp-specific trap:** GStreamer writes `Contents/Frameworks/registry.bin`
+into the bundle on first launch, which breaks the code seal and makes Apple reject
+notarization ("the signature of the binary is invalid"). **Never launch the app
+between signing and notarizing** — sign last, notarize a freshly-signed bundle. A
+durable fix worth landing in the app: point `GST_REGISTRY_1_0` at a per-user cache
+path so the registry never lands inside the `.app` (otherwise an end user's first
+launch also breaks the local signature). Also: `notarytool` needs
+`--keychain …/fleet-signing.keychain-db` over SSH (login keychain is locked), and
+`create-dmg` hangs headless — use `hdiutil create -format UDZO` then codesign.
