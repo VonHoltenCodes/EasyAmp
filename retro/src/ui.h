@@ -13,7 +13,8 @@
 #include "gfx.h"
 
 #define EA_WIN_W 730
-#define EA_WIN_H 578
+#define EA_WIN_H 578          /* the full design height */
+#define EA_MIN_H 452          /* the layout can give up this much; below it the shell scales the picture */
 
 /* ui_model_changed() flags */
 #define UI_CH_TIME      0x01
@@ -38,6 +39,10 @@ typedef struct ea_ui ea_ui;
 ea_ui      *ui_create(ea_model *m, const ea_actions *a, ea_px *pixels);
 void        ui_destroy(ea_ui *ui);
 ea_surface *ui_surface(ea_ui *ui);
+/* fit a shorter screen: the visualizer, the slider banks and the lists give up
+ * the space, everything else keeps its size. Clamped to EA_MIN_H..EA_WIN_H. */
+void        ui_set_height(ea_ui *ui, int height);
+int         ui_height(ea_ui *ui);
 
 void ui_set_page(ea_ui *ui, int page);
 void ui_list_reset(ea_ui *ui);                        /* library browser entered a new level */

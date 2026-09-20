@@ -36,6 +36,12 @@ static HBITMAP    g_dib, g_olddib;
 static HPALETTE   g_pal;
 static void      *g_dibbits;
 static int        g_present, g_dib_stride, g_green_bits, g_force_depth;
+/* fitting a small screen: the layout gives up height first (crisp); only when
+ * the screen is still too small is the finished picture scaled down */
+static float      g_scale = 1.0f;
+static int        g_ww = EA_WIN_W, g_wh = EA_WIN_H;      /* the window, in real pixels */
+static int        g_fit_w, g_fit_h;                      /* /fit:WxH - pretend the screen is this big (testing) */
+static ea_surface g_small;                               /* the scaled picture, when g_scale < 1 */
 static ea_model   g_m;
 static ea_ui     *g_ui;
 static ea_engine *g_eng;
@@ -904,6 +910,45 @@ static void on_eq(void *ctx) { (void)ctx; eng_set_dsp(g_eng, &g_m); }
 
 /* ---- painting ------------------------------------------------------------------------ */
 
+/* the usable desktop: the screen minus the taskbar and any other docked bars */
+static void work_area(RECT *r)
+{
+    if (!SystemParametersInfoA(SPI_GETWORKAREA, 0, r, 0)) { r->left = r->top = 0; r->right = GetSystemMetrics(SM_CXSCREEN); r->bottom = GetSystemMetrics(SM_CYSCREEN); }
+    if (g_fit_w > 0) { r->left = r->top = 0; r->right = g_fit_w; r->bottom = g_fit_h; }
+}
+
+/* choose the layout height and, if it must be, the scale, for this desktop */
+static void fit_to_screen(void)
+{
+    RECT wa;
+    int aw, ah, h;
+    float sc = 1.0f;
+    work_area(&wa);
+    aw = wa.right - wa.left; ah = wa.bottom - wa.top;
+    if (aw < EA_WIN_W) sc = (float)aw / EA_WIN_W;
+    h = (int)(ah / sc);
+    if (h > EA_WIN_H) h = EA_WIN_H;
+    if (h < EA_MIN_H) { h = EA_MIN_H; if ((float)ah / EA_MIN_H < sc) sc = (float)ah / EA_MIN_H; }
+    if (sc < 0.4f) sc = 0.4f;
+    g_scale = sc;
+    ui_set_height(g_ui, h);
+    g_ww = sc < 1.0f ? (int)(EA_WIN_W * sc) : EA_WIN_W;
+    g_wh = sc < 1.0f ? (int)(ui_height(g_ui) * sc) : ui_height(g_ui);
+    free(g_small.px); g_small.px = 0;
+    if (sc < 1.0f) gfx_init(&g_small, g_ww, g_wh, (ea_px *)calloc((size_t)g_ww * g_wh, sizeof(ea_px)));
+}
+
+/* keep the whole window on the usable desktop */
+static void clamp_to_work_area(int *x, int *y)
+{
+    RECT wa;
+    work_area(&wa);
+    if (*x + g_ww > wa.right) *x = wa.right - g_ww;
+    if (*y + g_wh > wa.bottom) *y = wa.bottom - g_wh;
+    if (*x < wa.left) *x = wa.left;
+    if (*y < wa.top) *y = wa.top;
+}
+
 static void presenter_free(void)
 {
     if (g_memdc) { if (g_olddib) SelectObject(g_memdc, g_olddib); DeleteDC(g_memdc); }
@@ -921,7 +966,7 @@ static int presenter_init(void)
     if (g_force_depth) bpp = g_force_depth;
     presenter_free();
     memset(&bi, 0, sizeof bi);
-    bi.h.biSize = sizeof bi.h; bi.h.biWidth = EA_WIN_W; bi.h.biHeight = -EA_WIN_H; bi.h.biPlanes = 1; bi.h.biCompression = BI_RGB;
+    bi.h.biSize = sizeof bi.h; bi.h.biWidth = g_ww; bi.h.biHeight = -g_wh; bi.h.biPlanes = 1; bi.h.biCompression = BI_RGB;
     if (bpp >= 24) { g_present = PRESENT_DIRECT; bits = 32; }
     else if (bpp >= 15) {
         g_present = PRESENT_HICOLOR; bits = 16;
@@ -943,7 +988,7 @@ static int presenter_init(void)
         }
     }
     bi.h.biBitCount = (WORD)bits;
-    g_dib_stride = ((EA_WIN_W * bits + 31) / 32) * 4;
+    g_dib_stride = ((g_ww * bits + 31) / 32) * 4;
     g_memdc = CreateCompatibleDC(screen);
     g_dib = CreateDIBSection(screen, (BITMAPINFO *)&bi, DIB_RGB_COLORS, &g_dibbits, 0, 0);
     ReleaseDC(0, screen);
@@ -952,19 +997,21 @@ static int presenter_init(void)
     return 1;
 }
 
-/* convert one rect of the UI's picture into the off-screen bitmap */
+/* bring one rect of the WINDOW (real pixels) up to date in the off-screen
+ * bitmap: scale the UI's picture down into it if needed, then reduce colours */
 static void convert(int x, int y, int w, int h)
 {
     ea_surface *s = ui_surface(g_ui);
     int j;
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
-    if (x + w > EA_WIN_W) w = EA_WIN_W - x;
-    if (y + h > EA_WIN_H) h = EA_WIN_H - y;
+    if (x + w > g_ww) w = g_ww - x;
+    if (y + h > g_wh) h = g_wh - y;
     if (w <= 0 || h <= 0) return;
+    if (g_scale < 1.0f && g_small.px) { gfx_downscale(s, &g_small, g_scale, x, y, w, h); s = &g_small; }
     switch (g_present) {
     case PRESENT_DIRECT:
-        for (j = 0; j < h; j++) memcpy((ea_px *)g_dibbits + (y + j) * EA_WIN_W + x, s->px + (y + j) * EA_WIN_W + x, (size_t)w * 4);
+        for (j = 0; j < h; j++) memcpy((ea_px *)g_dibbits + (y + j) * g_ww + x, s->px + (y + j) * s->w + x, (size_t)w * 4);
         break;
     case PRESENT_HICOLOR: gfx_dither16(s, x, y, w, h, (unsigned short *)g_dibbits, g_dib_stride, g_green_bits); break;
     case PRESENT_PAL256:  gfx_dither_indexed(s, x, y, w, h, (unsigned char *)g_dibbits, g_dib_stride, EA_LUT256, 20); break;
@@ -983,8 +1030,16 @@ static void present(HDC dc)
     int n = ui_render(g_ui, d, 48), i;
     use_palette(dc);
     for (i = 0; i < n; i++) {
-        convert(d[i].x, d[i].y, d[i].w, d[i].h);
-        BitBlt(dc, d[i].x, d[i].y, d[i].w, d[i].h, g_memdc, d[i].x, d[i].y, SRCCOPY);
+        int x = d[i].x, y = d[i].y, w = d[i].w, h = d[i].h;
+        if (g_scale < 1.0f) {                                /* a design rect -> the window pixels it touches */
+            int x1 = (int)((d[i].x + d[i].w) * g_scale) + 2, y1 = (int)((d[i].y + d[i].h) * g_scale) + 2;
+            x = (int)(d[i].x * g_scale) - 1; y = (int)(d[i].y * g_scale) - 1;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            w = x1 - x; h = y1 - y;
+        }
+        convert(x, y, w, h);
+        BitBlt(dc, x, y, w, h, g_memdc, x, y, SRCCOPY);
     }
 }
 
@@ -1000,21 +1055,21 @@ static void save_shot(void)
     HBITMAP bm, old;
     FILE *f;
     memset(&bi, 0, sizeof bi);
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader; bi.bmiHeader.biWidth = EA_WIN_W; bi.bmiHeader.biHeight = EA_WIN_H;
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader; bi.bmiHeader.biWidth = g_ww; bi.bmiHeader.biHeight = g_wh;
     bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
     bm = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, 0, 0);
     ReleaseDC(0, screen);
     if (!dc || !bm) return;
     old = (HBITMAP)SelectObject(dc, bm);
-    convert(0, 0, EA_WIN_W, EA_WIN_H);
-    BitBlt(dc, 0, 0, EA_WIN_W, EA_WIN_H, g_memdc, 0, 0, SRCCOPY);
+    convert(0, 0, g_ww, g_wh);
+    BitBlt(dc, 0, 0, g_ww, g_wh, g_memdc, 0, 0, SRCCOPY);
     GdiFlush();
     f = fopen(g_shot, "wb");
     if (f) {
         memset(&fh, 0, sizeof fh);
-        fh.bfType = 0x4d42; fh.bfOffBits = sizeof fh + sizeof bi.bmiHeader; fh.bfSize = fh.bfOffBits + EA_WIN_W * EA_WIN_H * 4;
+        fh.bfType = 0x4d42; fh.bfOffBits = sizeof fh + sizeof bi.bmiHeader; fh.bfSize = fh.bfOffBits + (DWORD)(g_ww * g_wh * 4);
         fwrite(&fh, sizeof fh, 1, f); fwrite(&bi.bmiHeader, sizeof bi.bmiHeader, 1, f);
-        fwrite(bits, 4, EA_WIN_W * EA_WIN_H, f);
+        fwrite(bits, 4, (size_t)(g_ww * g_wh), f);
         fclose(f);
     }
     SelectObject(dc, old); DeleteObject(bm); DeleteDC(dc);
@@ -1059,6 +1114,9 @@ static int map_key(WPARAM vk)
 static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
+    if (g_scale < 1.0f && (msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == WM_LBUTTONDBLCLK)) {
+        x = (int)(x / g_scale); y = (int)(y / g_scale);       /* the UI thinks in design pixels */
+    }
     switch (msg) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -1077,17 +1135,23 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_PALETTECHANGED:
         if (g_pal && (HWND)wp != h) { HDC dc = GetDC(h); use_palette(dc); ReleaseDC(h, dc); InvalidateRect(h, 0, FALSE); }
         return 0;
-    case WM_DISPLAYCHANGE:          /* the user changed colour depth: pick the matching path */
+    case WM_DISPLAYCHANGE: {        /* new resolution or colour depth: refit, and pick the matching colour path */
+        RECT rc;
+        int nx, ny;
+        fit_to_screen();
         presenter_init();
+        GetWindowRect(h, &rc); nx = rc.left; ny = rc.top;
+        clamp_to_work_area(&nx, &ny);
+        SetWindowPos(h, 0, nx, ny, g_ww, g_wh, SWP_NOZORDER | SWP_NOACTIVATE);
         InvalidateRect(h, 0, FALSE);
-        return 0;
+        return 0; }
     case WM_ERASEBKGND: return 1;
     case WM_TIMER: frame(); return 0;
     case WM_NCHITTEST: {
         POINT p;
         p.x = x; p.y = y;
         ScreenToClient(h, &p);
-        return ui_is_caption(g_ui, p.x, p.y) ? HTCAPTION : HTCLIENT; }
+        return ui_is_caption(g_ui, (int)(p.x / g_scale), (int)(p.y / g_scale)) ? HTCAPTION : HTCLIENT; }
     case WM_MOUSEMOVE:   ui_mouse_move(g_ui, x, y); return 0;
     case WM_LBUTTONDOWN: SetCapture(h); ui_set_mods(g_ui, ((wp & MK_SHIFT) ? UI_MOD_SHIFT : 0) | ((wp & MK_CONTROL) ? UI_MOD_CTRL : 0)); ui_mouse_down(g_ui, x, y); return 0;
     case WM_LBUTTONUP:   ui_mouse_up(g_ui, x, y); ReleaseCapture(); return 0;
@@ -1096,7 +1160,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         POINT p;
         p.x = x; p.y = y;
         ScreenToClient(h, &p);
-        ui_wheel(g_ui, p.x, p.y, (short)HIWORD(wp) / 120);
+        ui_wheel(g_ui, (int)(p.x / g_scale), (int)(p.y / g_scale), (short)HIWORD(wp) / 120);
         return 0; }
     case WM_KEYDOWN: {
         int ctrl = GetKeyState(VK_CONTROL) < 0, k = ctrl && wp == 'A' ? UI_KEY_SELECT_ALL : map_key(wp);
@@ -1145,6 +1209,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         else if (!strncmp(a, "/shotms:", 8)) g_shot_at = (DWORD)atoi(a + 8);
         else if (!strncmp(a, "/page:", 6)) cmd_page = atoi(a + 6);
         else if (!strcmp(a, "/nostate")) g_nostate = 1;
+        else if (!strncmp(a, "/fit:", 5)) { g_fit_w = atoi(a + 5); g_fit_h = strchr(a, 'x') ? atoi(strchr(a, 'x') + 1) : 0; if (g_fit_h <= 0) g_fit_w = 0; }
         else if (!strncmp(a, "/depth:", 7)) g_force_depth = atoi(a + 7);      /* 32, 16, 15, 8, 4: try a colour path on any desktop */
         else if (!strncmp(a, "/preset:", 8)) { int p = atoi(a + 8); if (p >= 0 && p < ea_preset_count()) ea_preset_apply(&g_m, p); }
         else if (!strncmp(a, "/vu", 3)) g_m.viz_vu = 1;
@@ -1156,6 +1221,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         else { const char *dot = strrchr(a, '.'); if (!autoplay) pl_clear(); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
     }
     eng_set_dsp(g_eng, &g_m);
+    fit_to_screen();                                  /* before the off-screen bitmap: it is sized to the window */
     net_init();
     sources_startup();
     if (!presenter_init()) { MessageBoxA(0, "Could not create the display surface.", "EasyAmp", MB_ICONERROR); return 1; }
@@ -1166,12 +1232,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wc.hCursor = LoadCursorA(0, IDC_ARROW);
     wc.hIcon = LoadIconA(inst, MAKEINTRESOURCEA(1));
     if (!RegisterClassA(&wc)) return 1;
-    sx = (GetSystemMetrics(SM_CXSCREEN) - EA_WIN_W) / 2; sy = (GetSystemMetrics(SM_CYSCREEN) - EA_WIN_H) / 2;
-    /* the remembered position, unless the screen has since shrunk under it */
-    if (wx > -EA_WIN_W + 80 && wy > -20 && wx < GetSystemMetrics(SM_CXSCREEN) - 80 && wy < GetSystemMetrics(SM_CYSCREEN) - 40) { sx = wx; sy = wy; }
+    { RECT wa; work_area(&wa); sx = wa.left + (wa.right - wa.left - g_ww) / 2; sy = wa.top + (wa.bottom - wa.top - g_wh) / 2; }
+    if (wx > -32000 && wy > -32000) { sx = wx; sy = wy; }  /* the remembered position... */
+    clamp_to_work_area(&sx, &sy);                          /* ...but never off a screen that has since shrunk */
     if (cmd_page >= 0) page = cmd_page;
     g_wnd = CreateWindowExA(WS_EX_ACCEPTFILES, "EasyAmpRetro", "EasyAmp", WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
-                            sx, sy < 0 ? 0 : sy, EA_WIN_W, EA_WIN_H, 0, 0, inst, 0);
+                            sx, sy, g_ww, g_wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     ui_set_page(g_ui, page);
     if (autoplay && g_m.ntracks) play_index(0, 0);
@@ -1186,6 +1252,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     eng_destroy(g_eng);
     ui_destroy(g_ui);
     presenter_free();
+    free(g_small.px);
     net_shutdown();
     return 0;
 }
