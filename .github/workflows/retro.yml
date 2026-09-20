@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Toolchain
-        run: sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-i686 binutils-mingw-w64-i686
+        run: sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-i686 binutils-mingw-w64-i686 nsis
 
       - name: Tests (filters, JSON, EQ formats, list selection)
         working-directory: retro
@@ -33,7 +33,7 @@ jobs:
       # anything Windows 98 SE lacks - the loader there would refuse to start it.
       - name: Build
         working-directory: retro
-        run: make win
+        run: make win installer
 
       - name: Tag must match the version compiled into the exe
         if: startsWith(github.ref, 'refs/tags/retro-v')
@@ -46,15 +46,19 @@ jobs:
       - name: Package
         working-directory: retro
         run: |
-          mkdir -p dist && cp build/EASYAMP.EXE dist/
-          printf 'EasyAmp retro - Windows 98 SE through XP\r\n\r\nOne file, nothing to install: put EASYAMP.EXE in a folder of its own and run it.\r\nIt keeps its settings (EASYAMP.INI) and playlist (EASYAMP.M3U) beside itself.\r\n\r\nPlays MP3, FLAC, Ogg Vorbis and WAV. Streams from Plex and Jellyfin.\r\nNeeds a Pentium II class CPU or better and any colour depth from 16 colours up.\r\n\r\nhttps://github.com/VonHoltenCodes/EasyAmp/tree/main/retro\r\n' > dist/README.TXT
-          cd dist && sha256sum EASYAMP.EXE > SHA256SUMS.txt && zip -q ../EasyAmp-retro-win98-xp.zip EASYAMP.EXE README.TXT && cat SHA256SUMS.txt
+          mkdir -p dist
+          cp build/EasyAmp-Retro-Setup.exe build/EASYAMP.EXE web/README.TXT dist/
+          cd dist
+          zip -q EasyAmp-retro-portable.zip EASYAMP.EXE README.TXT
+          sha256sum EasyAmp-Retro-Setup.exe EasyAmp-retro-portable.zip EASYAMP.EXE > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: EasyAmp-retro-win98-xp
           path: |
-            retro/EasyAmp-retro-win98-xp.zip
+            retro/dist/EasyAmp-Retro-Setup.exe
+            retro/dist/EasyAmp-retro-portable.zip
             retro/dist/SHA256SUMS.txt
 
       # make_latest: false is load-bearing. The README and the website link to
@@ -66,5 +70,6 @@ jobs:
         with:
           make_latest: false
           files: |
-            retro/EasyAmp-retro-win98-xp.zip
+            retro/dist/EasyAmp-Retro-Setup.exe
+            retro/dist/EasyAmp-retro-portable.zip
             retro/dist/SHA256SUMS.txt

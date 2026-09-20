@@ -3,7 +3,7 @@
 #ifndef EA_APP_H
 #define EA_APP_H
 
-#define EA_VERSION     "0.4.0"
+#define EA_VERSION     "0.4.1"
 #define EA_MAX_BANDS   32
 #define EA_MIN_BANDS   10
 #define EA_GRAPHIC_N   10

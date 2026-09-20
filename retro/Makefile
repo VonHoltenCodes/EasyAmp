@@ -49,13 +49,22 @@ build/EASYAMP.EXE: $(WINSRC) src/*.h build/easyamp_res.o build/libbearssl-win.a
 
 win: build/EASYAMP.EXE
 
+# The installer (NSIS: its output still runs on Windows 9x, and makensis is a
+# native Linux program). Version comes from src/app.h so the two cannot drift.
+VERSION := $(shell sed -n 's/^\#define EA_VERSION *"\(.*\)"/\1/p' src/app.h)
+
+build/EasyAmp-Retro-Setup.exe: build/EASYAMP.EXE installer/easyamp.nsi web/README.TXT
+	makensis -V2 -DVERSION=$(VERSION) installer/easyamp.nsi
+
+installer: build/EasyAmp-Retro-Setup.exe
+
 test: build/easyamp-shot
 	$(CC) $(CFLAGS) -o build/test_dsp tests/test_dsp.c src/dsp.c src/app.c -lm && ./build/test_dsp
 	$(CC) $(CFLAGS) -o build/test_json tests/test_json.c src/json.c && ./build/test_json
 	$(CC) $(CFLAGS) -o build/test_eqio tests/test_eqio.c src/app.c -lm && ./build/test_eqio
 	$(CC) $(CFLAGS) -o build/test_select tests/test_select.c $(CORE) -lm && ./build/test_select
 
-.PHONY: win test
+.PHONY: win test installer
 
 # ---- TLS (BearSSL, fetched and pinned; see tools/fetch-bearssl.sh) ----------------
 BR      := third_party/bearssl

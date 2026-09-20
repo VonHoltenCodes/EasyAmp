@@ -87,7 +87,8 @@ make fonts   # regenerate the glyph atlases (needs Pillow, numpy, scipy; commit 
 make palette # re-tune the 256-colour palette after a visual change (commit the result)
 make shots   # render every UI state to build/shots/*.png, no Windows needed
 make test    # filters + analyzer, JSON, EQ file formats, list multi-select
-make win     # cross-compile build/EASYAMP.EXE (needs i686-w64-mingw32-gcc)
+make win        # cross-compile build/EASYAMP.EXE (needs i686-w64-mingw32-gcc)
+make installer  # build/EasyAmp-Retro-Setup.exe (needs nsis)
 ```
 
 The subsystem / OS version stamps in the Makefile are what let a real
@@ -119,6 +120,24 @@ Verified on real hardware: an HP Pavilion 6460 (Windows 98 SE, Celeron 400,
 
 Not yet: a 2x window for large monitors, album art, gapless playback.
 
+## Installer and portable
+
+`installer/easyamp.nsi` builds `EasyAmp-Retro-Setup.exe` with NSIS: its
+installers still run on Windows 95 and later, and `makensis` is a native Linux
+program, so CI builds it with no Windows machine involved. `Unicode false`
+(ANSI) is what lets the result load on Windows 9x. It installs to Program
+Files, adds Start Menu and desktop shortcuts and an Add/Remove Programs entry;
+the uninstaller asks before removing settings, because they hold server
+sign-ins, and defaults to keeping them.
+
+The same `EASYAMP.EXE` is also the portable build. Settings live beside the
+exe when that folder can be written, otherwise in `%APPDATA%\EasyAmp` (a
+limited account on XP cannot write to Program Files).
+
+`web/` is the plain-HTTP download page served at
+`http://dl.easyampstereo.com/retro/`: HTML 3.2, no scripts, no TLS, because
+the machines this is for cannot open an HTTPS site to fetch it.
+
 ## Things that will bite you
 
 - **An import Windows 98 lacks is fatal, not degraded**: the loader refuses
@@ -127,6 +146,9 @@ Not yet: a 2x window for large monitors, album art, gapless playback.
   `sscanf` call pulls in mingw's scanf) and `_ftelli64` (dr_flac's stdio
   layer - it is fed through callbacks instead).
 - The fonts are ASCII. Metadata is folded from UTF-8 (`json.c`).
+- The icon must be classic BMP-format entries (`tools/mkicon.py`). Pillow's
+  own .ico writer stores PNG, which Windows only reads from Vista on: on 98
+  and XP the taskbar button and every shortcut showed the generic icon.
 - Anything a human must TYPE elsewhere cannot use the skin's pixel font:
   Pixelify draws 2/Z, 5/S, 8/B and 0/O identically.
 

@@ -257,12 +257,27 @@ static char      g_auto_jf[3][128];                       /* /jf:server,user,pas
 static void on_src_open(void *ctx, int idx);
 static void on_command(void *ctx, int cmd);
 
+/* Where EASYAMP.INI and EASYAMP.M3U live. Beside the exe when that folder can
+ * be written (portable use, and any Windows 98 install). Installed under
+ * Program Files on XP a limited user cannot write there, so fall back to
+ * %APPDATA%\EasyAmp. */
 static void ini_path(void)
 {
-    char *slash;
-    GetModuleFileNameA(0, g_ini, MAX_PATH - 12);
-    slash = strrchr(g_ini, '\\');
-    strcpy(slash ? slash + 1 : g_ini, "EASYAMP.INI");
+    char dir[MAX_PATH], probe[MAX_PATH], *slash;
+    const char *appdata;
+    HANDLE h;
+    if (g_ini[0]) return;
+    GetModuleFileNameA(0, dir, MAX_PATH - 16);
+    slash = strrchr(dir, '\\');
+    if (slash) slash[1] = 0; else dir[0] = 0;
+    _snprintf(probe, MAX_PATH, "%sEASYAMP.TMP", dir); probe[MAX_PATH - 1] = 0;
+    h = CreateFileA(probe, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, 0);
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    else if ((appdata = getenv("APPDATA")) != 0 && appdata[0] && strlen(appdata) < MAX_PATH - 32) {
+        _snprintf(dir, MAX_PATH, "%s\\EasyAmp\\", appdata); dir[MAX_PATH - 1] = 0;
+        CreateDirectoryA(dir, 0);
+    }
+    _snprintf(g_ini, MAX_PATH, "%sEASYAMP.INI", dir); g_ini[MAX_PATH - 1] = 0;
 }
 
 static void accounts_to_model(void)
