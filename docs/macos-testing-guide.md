@@ -12,7 +12,7 @@ Option B (build from source) is the fallback if the prebuilt one won't run.
 > source) — GitHub no longer offers Intel build machines for the prebuilt one.
 > To check: Apple menu → About This Mac → "Chip"/"Processor".
 >
-> **macOS 12 (Monterey) or newer** is required.
+> **macOS 15 (Sequoia) or newer** is required. On macOS 14, use [0.6.2](https://github.com/VonHoltenCodes/EasyAmp/releases/download/v0.6.2/EasyAmp-macos-arm64.dmg), the final version for that system.
 
 ---
 
