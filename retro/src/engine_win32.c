@@ -9,6 +9,7 @@
 #include "engine.h"
 #include "dsp.h"
 #include "net.h"
+#include "decoders.h"
 
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_NO_SIMD                 /* the floor is a Pentium II: no SSE */
@@ -89,7 +90,7 @@ static int rd_seek(reader *r, long pos)
 }
 
 static int rd_is_open(const reader *r) { return r->f || r->hs; }
-enum { SRC_NONE, SRC_MP3, SRC_WAV };
+enum { SRC_NONE, SRC_MP3, SRC_WAV, SRC_PCM };     /* SRC_PCM: FLAC / Ogg Vorbis via decoders.c */
 
 struct ea_engine {
     HANDLE thread, wake;
@@ -111,6 +112,7 @@ struct ea_engine {
     short *pcm[NBUF];
     int wo_rate, paused;
     reader rd;
+    ea_pcmdec *dec;
     int src, eof;
     long data_start, data_len;
     mp3dec_t mp3;
@@ -134,6 +136,7 @@ static unsigned be32(const unsigned char *p) { return ((unsigned)p[0] << 24) | (
 static void src_close(ea_engine *e)
 {
     rd_close(&e->rd);
+    if (e->dec) { pcmdec_close(e->dec); e->dec = 0; }
     e->src = SRC_NONE;
 }
 
@@ -192,7 +195,14 @@ static int wav_more(ea_engine *e)
     return n;
 }
 
-static int src_more(ea_engine *e) { return e->src == SRC_MP3 ? mp3_more(e) : e->src == SRC_WAV ? wav_more(e) : 0; }
+static int pcm_more(ea_engine *e)
+{
+    int n = pcmdec_read(e->dec, e->stage, 1152);
+    e->stage_len = n > 0 ? n : 0; e->stage_pos = 0;
+    return e->stage_len;
+}
+
+static int src_more(ea_engine *e) { return e->src == SRC_MP3 ? mp3_more(e) : e->src == SRC_WAV ? wav_more(e) : e->src == SRC_PCM ? pcm_more(e) : 0; }
 
 static int open_wav(ea_engine *e, const unsigned char *h, long size)
 {
@@ -234,6 +244,18 @@ static int src_open(ea_engine *e, const char *path)
     short tmp[MINIMP3_MAX_SAMPLES_PER_FRAME];
     int n = 0, tries = 0;
     src_close(e);
+    e->eof = 0; e->stage_len = e->stage_pos = 0; e->in_len = e->in_pos = 0; e->rs_pos = 0;
+    e->rs_last[0] = e->rs_last[1] = 0;
+    {   /* FLAC and Ogg Vorbis: local files only, by extension */
+        const char *dot = strrchr(path, '.');
+        if (dot && strncmp(path, "http", 4) && (!lstrcmpiA(dot, ".flac") || !lstrcmpiA(dot, ".ogg") || !lstrcmpiA(dot, ".oga"))) {
+            e->dec = pcmdec_open(path, &e->rate, &e->channels, &e->dur_ms, &e->kbps);
+            if (!e->dec) return 0;
+            e->data_start = 0; e->data_len = 1;               /* non-zero: this source can seek */
+            e->src = SRC_PCM;
+            return 1;
+        }
+    }
     if (!rd_open(&e->rd, path)) return 0;
     size = e->rd.size;
     if (rd_read(&e->rd, h, 12) != 12) { src_close(e); return 0; }
@@ -291,6 +313,7 @@ static int src_open(ea_engine *e, const char *path)
 static void src_seek(ea_engine *e, float frac)
 {
     long off = (long)((double)e->data_len * frac);
+    if (e->src == SRC_PCM) { pcmdec_seek(e->dec, frac); e->stage_len = e->stage_pos = 0; e->eof = 0; e->rs_pos = 0; return; }
     if (e->src == SRC_WAV) off -= off % e->wav_bytes_per_frame;
     if (!rd_seek(&e->rd, e->data_start + off)) e->eof = 1;
     if (e->src == SRC_MP3) mp3dec_init(&e->mp3);         /* it resyncs on the next header */

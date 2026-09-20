@@ -3,7 +3,7 @@
 #ifndef EA_APP_H
 #define EA_APP_H
 
-#define EA_VERSION     "0.2.1"
+#define EA_VERSION     "0.3.0"
 #define EA_MAX_BANDS   32
 #define EA_MIN_BANDS   10
 #define EA_GRAPHIC_N   10
@@ -18,6 +18,7 @@
 
 enum { EA_PAGE_PLAYER, EA_PAGE_EQ, EA_PAGE_SOURCES, EA_PAGE_COUNT };
 enum { EA_STOPPED, EA_PLAYING, EA_PAUSED };
+enum { EA_PEAK, EA_LOW_SHELF, EA_HIGH_SHELF };     /* same numbering as the GTK app / equalizer-nbands */
 
 enum {  /* ea_actions.command ids */
     EA_CMD_EJECT = 1, EA_CMD_PREV, EA_CMD_PLAYPAUSE, EA_CMD_STOP, EA_CMD_NEXT,
@@ -48,10 +49,12 @@ typedef struct ea_model {
     float preamp;
     int   nbands, selband;
     float gains[EA_MAX_BANDS], freqs[EA_MAX_BANDS], q[EA_MAX_BANDS];
+    int   types[EA_MAX_BANDS];       /* EA_PEAK / EA_LOW_SHELF / EA_HIGH_SHELF (imported curves use shelves) */
     float in_gain, out_gain, balance, pitch;
     char  preset[32];
     /* visualizer feed (0..1 levels, -1..1 wave) */
     int   viz_vu;
+    int   show_eq, show_pl;          /* player page: the EQ and PL buttons hide their panels and the rest reflows */
     float levels[EA_VIZ_BANDS], wave[EA_WAVE], vu_l, vu_r;
     /* sources page: one linked Plex account and the level being browsed */
     ea_acct accts[EA_MAX_SOURCES];
@@ -87,5 +90,12 @@ void  ea_graphic_set(ea_model *m, const float *ten);
 int   ea_preset_count(void);
 const char *ea_preset_name(int i);
 void  ea_preset_apply(ea_model *m, int i);
+
+/* EQ interchange, the same two formats the GTK app reads and writes:
+ * Equalizer APO config.txt ("Preamp:" + "Filter N: ON PK Fc .. Gain .. Q ..")
+ * and the AutoEQ one-line "GraphicEQ: f g; f g; ...". */
+int   ea_eq_import(ea_model *m, const char *text);           /* 1 when a curve was read */
+int   ea_eq_export_apo(const ea_model *m, char *out, int cap);
+int   ea_eq_export_geq(const ea_model *m, char *out, int cap);
 
 #endif

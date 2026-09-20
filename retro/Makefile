@@ -33,7 +33,7 @@ clean:
 
 .PHONY: shots clean palette
 
-WINSRC := $(CORE) src/dsp.c src/engine_win32.c src/main_win32.c src/net_win32.c src/plex.c src/json.c src/source.c
+WINSRC := $(CORE) src/dsp.c src/engine_win32.c src/main_win32.c src/net_win32.c src/plex.c src/json.c src/source.c src/decoders.c
 
 build/easyamp_res.o: src/easyamp.rc src/easyamp.ico
 	@mkdir -p build
@@ -42,11 +42,14 @@ build/easyamp_res.o: src/easyamp.rc src/easyamp.ico
 build/EASYAMP.EXE: $(WINSRC) src/*.h build/easyamp_res.o build/libbearssl-win.a
 	$(WINCC) $(WINFLAGS) -D_WIN32_WINNT=0x0400 -DWINVER=0x0400 -Ithird_party/bearssl/inc -mwindows -static -s -o $@ \
 	    $(WINSRC) build/easyamp_res.o build/libbearssl-win.a -lwinmm -lcomdlg32 -lgdi32 -lshell32 -lws2_32
+	@tools/check-imports.sh $@ || { rm -f $@; exit 1; }
 
 win: build/EASYAMP.EXE
 
 test: build/easyamp-shot
 	$(CC) $(CFLAGS) -o build/test_dsp tests/test_dsp.c src/dsp.c src/app.c -lm && ./build/test_dsp
+	$(CC) $(CFLAGS) -o build/test_json tests/test_json.c src/json.c && ./build/test_json
+	$(CC) $(CFLAGS) -o build/test_eqio tests/test_eqio.c src/app.c -lm && ./build/test_eqio
 
 .PHONY: win test
 

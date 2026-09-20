@@ -95,7 +95,7 @@ typedef struct {
     ea_rect r;
     const char *label;
     int arg;                       /* command id or icon */
-    int hover, down, dirty;
+    int hover, down, dirty, hidden;
     float vmin, vmax, vstep, vdef; /* knobs */
 } widget;
 
@@ -121,7 +121,9 @@ struct ea_ui {
     float peaks[EA_VIZ_BANDS], pk_l, pk_r;
     /* overlay menu */
     struct { int open, owner, n, hover; ea_rect r; const char *items[MAX_MENU]; } menu;
-    int show_eq, show_pl;
+    /* player-page layout, recomputed when the EQ / PL panels are shown or hidden */
+    struct { ea_rect display, viz, xport, eqbar, eqctl, eqsmall; int eq, pl; } L;
+    int ix_status, ix_info, ix_scope, ix_seek, ix_viz, ix_xport, ix_led, ix_eqbtn, ix_eqsmall, ix_pl, ix_plbtn;
     int dlg_was_open, dlg_hover, dlg_down;
     int caret_on, caret_acc;
 };
@@ -321,16 +323,20 @@ static void separator(ea_surface *s, int x, int y, int h)
 static void chrome_player(ea_ui *ui)
 {
     ea_surface *s = &ui->bg;
-    lcd_well(s, &R_DISPLAY);
-    well(s, &R_VIZ, C_BLACK, C_WELL_EDGE, 8, 255);
-    metal_panel(s, &R_XPORT);
-    separator(s, R_XPORT.x + 188, R_XPORT.y + 5, R_XPORT.h - 10);
-    title_bar(s, &R_EQBAR, "EASYAMP EQUALIZER", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
-    metal_panel(s, &R_EQCTL);
-    smoke(s, &R_EQSMALL);
-    title_bar(s, &R_PLBAR, "EASYAMP PLAYLIST", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
-    well(s, &R_PLLIST, C_PLAYLIST, C_WELL_EDGE, 12, 230);
-    metal_panel(s, &R_PLBTNS);
+    lcd_well(s, &ui->L.display);
+    well(s, &ui->L.viz, C_BLACK, C_WELL_EDGE, 8, 255);
+    metal_panel(s, &ui->L.xport);
+    separator(s, ui->L.xport.x + 188, ui->L.xport.y + 5, ui->L.xport.h - 10);
+    if (ui->L.eq) {
+        title_bar(s, &ui->L.eqbar, "EASYAMP EQUALIZER", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
+        metal_panel(s, &ui->L.eqctl);
+        smoke(s, &ui->L.eqsmall);
+    }
+    if (ui->L.pl) {
+        title_bar(s, &R_PLBAR, "EASYAMP PLAYLIST", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
+        well(s, &R_PLLIST, C_PLAYLIST, C_WELL_EDGE, 12, 230);
+        metal_panel(s, &R_PLBTNS);
+    }
 }
 
 static void chrome_eq(ea_ui *ui)
@@ -396,8 +402,8 @@ static void draw_xport(ea_ui *ui, widget *w)
 static int toggle_state(ea_ui *ui, int id)
 {
     switch (id) {
-    case ID_EQ_SHOW: return ui->show_eq;
-    case ID_PL_SHOW: return ui->show_pl;
+    case ID_EQ_SHOW: return ui->m->show_eq;
+    case ID_PL_SHOW: return ui->m->show_pl;
     case ID_VU:      return ui->m->viz_vu;
     case ID_EQ_ON:   return ui->m->eq_on;
     case ID_BASS:    return ui->m->bass;
@@ -1228,21 +1234,27 @@ static void build_widgets(ea_ui *ui)
     add(ui, K_TAB, PG_ALL, 160, 555, 74, 20, "SOURCES", ID_TAB2, EA_PAGE_SOURCES);
     add(ui, K_FOOTSTAT, PG_ALL, 500, 555, 227, 20, 0, 0, EA_CMD_OPEN_UPDATE);
     /* player: display */
-    add(ui, K_STATUS, P, 9, 36, 176, 50, 0, 0, 0);
-    add(ui, K_INFO, P, 194, 38, 238, 40, 0, 0, 0);
-    add(ui, K_SCOPE, P, 12, 84, 172, 40, 0, 0, 0);
-    add(ui, K_SEEK, P, 194, 100, 238, 15, 0, 0, 0);
-    add(ui, K_VIZ, P, R_VIZ.x, R_VIZ.y, R_VIZ.w, R_VIZ.h, 0, 0, 0);
+    ui->ix_status = ui->nw; add(ui, K_STATUS, P, 9, 36, 176, 50, 0, 0, 0);
+    ui->ix_info = ui->nw; add(ui, K_INFO, P, 194, 38, 238, 40, 0, 0, 0);
+    ui->ix_scope = ui->nw; add(ui, K_SCOPE, P, 12, 84, 172, 40, 0, 0, 0);
+    ui->ix_seek = ui->nw; add(ui, K_SEEK, P, 194, 100, 238, 15, 0, 0, 0);
+    ui->ix_viz = ui->nw; add(ui, K_VIZ, P, R_VIZ.x, R_VIZ.y, R_VIZ.w, R_VIZ.h, 0, 0, 0);
+    ui->ix_xport = ui->nw;
     for (i = 0; i < 5; i++) add(ui, K_XPORT, P, 9 + i * 36, 275, 34, 28, 0, 0, xcmd[i]);
+    ui->ix_led = ui->nw;
     add(ui, K_LEDBTN, P, 203, 275, 52, 28, "EQ", ID_EQ_SHOW, 0);
     add(ui, K_LEDBTN, P, 259, 275, 52, 28, "PL", ID_PL_SHOW, 0);
     add(ui, K_LEDBTN, P, 315, 275, 52, 28, "VU", ID_VU, 0);
+    ui->ix_eqbtn = ui->nw;
     add(ui, K_TOGGLE, P, 9, 340, 56, 26, "ON", ID_EQ_ON, 0);
     add(ui, K_TOGGLE, P, 69, 340, 66, 26, "BASS", ID_BASS, 0);
     add(ui, K_TOGGLE, P, 139, 340, 66, 26, "LOUD", ID_LOUD, 0);
     add(ui, K_MENUBTN, P, 343, 340, 90, 26, "PRESETS", ID_PRESETS, 0);
+    ui->ix_eqsmall = ui->nw;
     add(ui, K_EQSMALL, P, R_EQSMALL.x, R_EQSMALL.y, R_EQSMALL.w, R_EQSMALL.h, 0, 0, 0);
+    ui->ix_pl = ui->nw;
     add(ui, K_PLAYLIST, P, R_PLLIST.x, R_PLLIST.y, R_PLLIST.w, R_PLLIST.h, 0, 0, 0);
+    ui->ix_plbtn = ui->nw;
     add(ui, K_STACKBTN, P, 448, 517, 44, 30, "+FILE", 0, EA_CMD_PL_ADD);
     add(ui, K_STACKBTN, P, 495, 517, 44, 30, "-FILE", 0, EA_CMD_PL_REMOVE);
     add(ui, K_BUTTON, P, 542, 517, 44, 30, "CLR", 0, EA_CMD_PL_CLEAR);
@@ -1280,7 +1292,35 @@ static void build_widgets(ea_ui *ui)
     add(ui, K_SRCSTATUS, S, 434, 517, 288, 30, 0, 0, 0);
 }
 
-static int on_page(ea_ui *ui, const widget *w) { return (w->pages & PG(ui->m->page)) != 0; }
+/* Player page geometry for the current EQ / PL visibility. Hiding the playlist
+ * widens the left column to the full window; hiding the EQ lets the
+ * visualizer grow into its space and drops the transport strip to the bottom. */
+static void relayout(ea_ui *ui)
+{
+    int eq = ui->m->show_eq, pl = ui->m->show_pl, lw = pl ? 436 : 724, i;
+    int viz_h = eq ? 138 : 381, xy = 130 + viz_h + 2;
+    ea_rect *r;
+    ui->L.eq = eq; ui->L.pl = pl;
+    ui->L.display = R_DISPLAY; ui->L.display.w = lw;
+    ui->L.viz = R_VIZ; ui->L.viz.w = lw; ui->L.viz.h = viz_h;
+    ui->L.xport = R_XPORT; ui->L.xport.w = lw; ui->L.xport.y = xy;
+    ui->L.eqbar = R_EQBAR; ui->L.eqbar.w = lw;
+    ui->L.eqctl = R_EQCTL; ui->L.eqctl.w = lw;
+    ui->L.eqsmall = R_EQSMALL; ui->L.eqsmall.w = lw;
+    ui->w[ui->ix_info].r.w = lw - 198;
+    ui->w[ui->ix_seek].r.w = lw - 198;
+    ui->w[ui->ix_viz].r = ui->L.viz;
+    for (i = 0; i < 5; i++) ui->w[ui->ix_xport + i].r.y = xy + 5;
+    for (i = 0; i < 3; i++) ui->w[ui->ix_led + i].r.y = xy + 5;
+    for (i = 0; i < 4; i++) ui->w[ui->ix_eqbtn + i].hidden = !eq;
+    r = &ui->w[ui->ix_eqbtn + 3].r; r->x = 3 + lw - 93;                 /* PRESETS hugs the right edge */
+    ui->w[ui->ix_eqsmall].hidden = !eq; ui->w[ui->ix_eqsmall].r = ui->L.eqsmall;
+    ui->w[ui->ix_pl].hidden = !pl;
+    for (i = 0; i < 5; i++) ui->w[ui->ix_plbtn + i].hidden = !pl;
+    ui->bg_page = -1;                                                  /* chrome must be repainted */
+}
+
+static int on_page(ea_ui *ui, const widget *w) { return !w->hidden && (w->pages & PG(ui->m->page)) != 0; }
 
 static void mark_kind(ea_ui *ui, int kind)
 {
@@ -1337,8 +1377,8 @@ ea_ui *ui_create(ea_model *m, const ea_actions *a, ea_px *pixels)
     ui->capture = ui->hover = -1;
     ui->menu.hover = -1;
     ui->bg_page = -1;
-    ui->show_eq = ui->show_pl = 1;
     build_widgets(ui);
+    ui->L.eq = ui->L.pl = -1;
     return ui;
 }
 
@@ -1399,7 +1439,7 @@ void ui_tick(ea_ui *ui, int elapsed_ms)
     ui->mq_acc += elapsed_ms;
     if (ui->mq_acc >= 220) {
         ui->mq_acc = 0;
-        if (gfx_text_w(&EA_FONT_LCD, ui->m->title, 1) > 238) { ui->mq_pos++; mark_kind(ui, K_INFO); mark_kind(ui, K_EQTIME); }
+        if (gfx_text_w(&EA_FONT_LCD, ui->m->title, 1) > ui->w[ui->ix_info].r.w) { ui->mq_pos++; mark_kind(ui, K_INFO); mark_kind(ui, K_EQTIME); }
     }
 }
 
@@ -1411,6 +1451,7 @@ static int intersects(const ea_rect *a, const ea_rect *b)
 int ui_render(ea_ui *ui, ea_rect *dirty, int max)
 {
     int i, n = 0, menu_hit = 0, dlg = (ui->m->link_open || ui->m->form_open) && ui->m->page == EA_PAGE_SOURCES;
+    if (ui->L.eq != ui->m->show_eq || ui->L.pl != ui->m->show_pl) { close_menu(ui); ui->capture = -1; relayout(ui); }
     if (ui->bg_page != ui->m->page) { build_bg(ui); ui->full_dirty = 1; }
     /* a modal dialog dims the whole page, so while it is up every change is a full repaint */
     if (dlg || ui->dlg_was_open != dlg) { for (i = 0; i < ui->nw; i++) if (ui->w[i].dirty) ui->full_dirty = 1; }
@@ -1690,8 +1731,8 @@ void ui_mouse_up(ea_ui *ui, int x, int y)
     case K_FOOTSTAT: if (ui->m->update_avail) command(ui, w->arg); break;
     case K_LEDBTN: case K_TOGGLE:
         switch (w->id) {
-        case ID_EQ_SHOW: ui->show_eq = !ui->show_eq; break;
-        case ID_PL_SHOW: ui->show_pl = !ui->show_pl; break;
+        case ID_EQ_SHOW: ui->m->show_eq = !ui->m->show_eq; break;      /* ui_render notices and reflows */
+        case ID_PL_SHOW: ui->m->show_pl = !ui->m->show_pl; break;
         case ID_VU:      ui->m->viz_vu = !ui->m->viz_vu; mark_kind(ui, K_VIZ); break;
         case ID_EQ_ON:   ui->m->eq_on = !ui->m->eq_on; eq_changed(ui); break;
         case ID_BASS:    ui->m->bass = !ui->m->bass; eq_changed(ui); break;

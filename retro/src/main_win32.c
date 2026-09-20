@@ -114,11 +114,17 @@ static int playable(const char *path)
 {
     const char *dot = strrchr(path, '.');
     if (is_url(path)) return 1;
-    return dot && (!lstrcmpiA(dot, ".mp3") || !lstrcmpiA(dot, ".mp2") || !lstrcmpiA(dot, ".wav"));
+    return dot && (!lstrcmpiA(dot, ".mp3") || !lstrcmpiA(dot, ".mp2") || !lstrcmpiA(dot, ".wav") ||
+                   !lstrcmpiA(dot, ".flac") || !lstrcmpiA(dot, ".ogg") || !lstrcmpiA(dot, ".oga"));
 }
 
-static void pl_add(const char *path)
+static void pl_add(const char *given)
 {
+    char full[MAX_PATH], *part;
+    const char *path = given;
+    /* store files by absolute path: the saved playlist must still work when
+     * EasyAmp is next started from somewhere else */
+    if (!is_url(given) && GetFullPathNameA(given, MAX_PATH, full, &part) > 0) path = full;
     if (!playable(path)) return;
     if (g_m.ntracks == g_cap) {
         int ncap = g_cap ? g_cap * 2 : 64;
@@ -644,7 +650,7 @@ static void add_files_dialog(int replace_and_play)
 {
     static char buf[32768];
     int first = replace_and_play ? 0 : g_m.ntracks;
-    if (!ask_file(0, "Music (*.mp3;*.mp2;*.wav)\0*.mp3;*.mp2;*.wav\0All files\0*.*\0", 0, buf, (int)sizeof buf, 1)) return;
+    if (!ask_file(0, "Music (*.mp3;*.flac;*.ogg;*.wav)\0*.mp3;*.mp2;*.flac;*.ogg;*.oga;*.wav\0All files\0*.*\0", 0, buf, (int)sizeof buf, 1)) return;
     if (replace_and_play) { eng_stop(g_eng); pl_clear(); }
     if (buf[strlen(buf) + 1] == 0) pl_add(buf);                     /* a single file */
     else {                                                        /* dir\0name\0name\0\0 */
@@ -654,6 +660,128 @@ static void add_files_dialog(int replace_and_play)
     }
     ui_model_changed(g_ui, UI_CH_PLAYLIST);
     if (replace_and_play && g_m.ntracks > first) play_index(0, first);
+}
+
+/* ---- settings that survive a restart -------------------------------------------------------
+ * EASYAMP.INI beside the exe: [eq] the whole bank, [ui] page / panels / meters /
+ * window position. The playlist is EASYAMP.M3U beside it (URLs stored without
+ * credentials). Written on exit and on Windows shutdown. */
+
+static int g_nostate;                               /* /nostate: neither read nor write (tests) */
+
+static void ini_float(const char *sec, const char *key, float v) { char t[32]; sprintf(t, "%.3f", v); WritePrivateProfileStringA(sec, key, t, g_ini); }
+static void ini_int(const char *sec, const char *key, int v) { char t[16]; sprintf(t, "%d", v); WritePrivateProfileStringA(sec, key, t, g_ini); }
+static float ini_getf(const char *sec, const char *key, float def) { char t[32]; GetPrivateProfileStringA(sec, key, "", t, sizeof t, g_ini); return t[0] ? (float)atof(t) : def; }
+
+static void state_path(char *out, const char *name)
+{
+    char *slash;
+    strcpy(out, g_ini);
+    slash = strrchr(out, '\\');
+    strcpy(slash ? slash + 1 : out, name);
+}
+
+static void state_save(void)
+{
+    char key[8], val[96], path[MAX_PATH];
+    RECT rc;
+    int i;
+    if (g_nostate) return;
+    ini_int("eq", "on", g_m.eq_on); ini_int("eq", "bass", g_m.bass); ini_int("eq", "loud", g_m.loud);
+    ini_float("eq", "preamp", g_m.preamp); ini_float("eq", "in", g_m.in_gain); ini_float("eq", "out", g_m.out_gain);
+    ini_float("eq", "balance", g_m.balance); ini_float("eq", "pitch", g_m.pitch);
+    ini_int("eq", "bands", g_m.nbands); ini_int("eq", "selected", g_m.selband);
+    WritePrivateProfileStringA("eq", "preset", g_m.preset, g_ini);
+    for (i = 0; i < EA_MAX_BANDS; i++) {
+        sprintf(key, "b%d", i);
+        if (i < g_m.nbands) sprintf(val, "%.2f %.2f %.3f %d", g_m.freqs[i], g_m.gains[i], g_m.q[i], g_m.types[i]);
+        WritePrivateProfileStringA("eq", key, i < g_m.nbands ? val : 0, g_ini);
+    }
+    ini_int("ui", "page", g_m.page); ini_int("ui", "vu", g_m.viz_vu);
+    ini_int("ui", "show_eq", g_m.show_eq); ini_int("ui", "show_pl", g_m.show_pl);
+    if (g_wnd && !IsIconic(g_wnd) && GetWindowRect(g_wnd, &rc)) { ini_int("ui", "x", rc.left); ini_int("ui", "y", rc.top); }
+    ini_int("ui", "selected", g_m.sel);
+    state_path(path, "EASYAMP.M3U");
+    if (g_m.ntracks) m3u_save(path); else DeleteFileA(path);
+}
+
+static void state_load(int *page, int *x, int *y)
+{
+    char key[8], val[96], path[MAX_PATH];
+    int i, n;
+    if (g_nostate) return;
+    n = (int)GetPrivateProfileIntA("eq", "bands", 0, g_ini);
+    if (n >= EA_MIN_BANDS && n <= EA_MAX_BANDS) {
+        int good = 0;
+        for (i = 0; i < n; i++) {
+            float f, g, q; int t = 0;
+            sprintf(key, "b%d", i);
+            GetPrivateProfileStringA("eq", key, "", val, sizeof val, g_ini);
+            {   /* not sscanf: mingw's scanf needs _strtoi64, which Windows 98's C library lacks */
+                char *p = val, *e;
+                f = (float)strtod(p, &e); if (e == p) break; p = e;
+                g = (float)strtod(p, &e); if (e == p) break; p = e;
+                q = (float)strtod(p, &e); if (e == p) break; p = e;
+                t = (int)strtol(p, &e, 10);
+            }
+            if (f < 10 || f > 22000) break;
+            g_m.freqs[i] = f; g_m.gains[i] = g < EA_BAND_MIN ? EA_BAND_MIN : (g > EA_BAND_MAX ? EA_BAND_MAX : g);
+            g_m.q[i] = q < 0.1f ? 0.1f : (q > 12 ? 12 : q); g_m.types[i] = t < 0 || t > 2 ? 0 : t;
+            good++;
+        }
+        if (good == n) g_m.nbands = n; else ea_model_init(&g_m);           /* a damaged bank: start flat rather than half-loaded */
+    }
+    g_m.eq_on = (int)GetPrivateProfileIntA("eq", "on", 1, g_ini) != 0;
+    g_m.bass = (int)GetPrivateProfileIntA("eq", "bass", 0, g_ini) != 0;
+    g_m.loud = (int)GetPrivateProfileIntA("eq", "loud", 0, g_ini) != 0;
+    g_m.preamp = ini_getf("eq", "preamp", 0); g_m.in_gain = ini_getf("eq", "in", 0); g_m.out_gain = ini_getf("eq", "out", 0);
+    g_m.balance = ini_getf("eq", "balance", 0); g_m.pitch = ini_getf("eq", "pitch", 1.0f);
+    if (g_m.preamp < EA_PRE_MIN || g_m.preamp > EA_PRE_MAX) g_m.preamp = 0;
+    if (g_m.pitch < 0.9f || g_m.pitch > 1.1f) g_m.pitch = 1.0f;
+    if (g_m.balance < -1 || g_m.balance > 1) g_m.balance = 0;
+    g_m.selband = (int)GetPrivateProfileIntA("eq", "selected", 0, g_ini);
+    if (g_m.selband < 0 || g_m.selband >= g_m.nbands) g_m.selband = 0;
+    GetPrivateProfileStringA("eq", "preset", "Flat", g_m.preset, sizeof g_m.preset, g_ini);
+    g_m.viz_vu = (int)GetPrivateProfileIntA("ui", "vu", 0, g_ini) != 0;
+    g_m.show_eq = (int)GetPrivateProfileIntA("ui", "show_eq", 1, g_ini) != 0;
+    g_m.show_pl = (int)GetPrivateProfileIntA("ui", "show_pl", 1, g_ini) != 0;
+    *page = (int)GetPrivateProfileIntA("ui", "page", 0, g_ini);
+    *x = (int)GetPrivateProfileIntA("ui", "x", -32000, g_ini); *y = (int)GetPrivateProfileIntA("ui", "y", -32000, g_ini);
+    state_path(path, "EASYAMP.M3U");
+    m3u_load(path);
+    g_m.sel = (int)GetPrivateProfileIntA("ui", "selected", -1, g_ini);
+    if (g_m.sel >= g_m.ntracks) g_m.sel = g_m.ntracks - 1;
+}
+
+/* ---- EQ files ----------------------------------------------------------------------------- */
+
+static void eq_import_file(void)
+{
+    static char text[65536];
+    char path[MAX_PATH];
+    FILE *f;
+    size_t n;
+    if (!ask_file(0, "Equalizer curves (*.txt)\0*.txt\0All files\0*.*\0", 0, path, MAX_PATH, 0)) return;
+    f = fopen(path, "rb");
+    if (!f) { MessageBoxA(g_wnd, "That file could not be opened.", "EasyAmp", MB_ICONWARNING); return; }
+    n = fread(text, 1, sizeof text - 1, f); text[n] = 0;
+    fclose(f);
+    if (!ea_eq_import(&g_m, text)) { MessageBoxA(g_wnd, "No equalizer curve found in that file.\n\nEasyAmp reads Equalizer APO config files and AutoEQ GraphicEQ lines.", "EasyAmp", MB_ICONINFORMATION); return; }
+    eng_set_dsp(g_eng, &g_m);
+    ui_model_changed(g_ui, UI_CH_EQ);
+}
+
+static void eq_export_file(int graphic)
+{
+    static char text[8192];
+    char path[MAX_PATH];
+    FILE *f;
+    if (!ask_file(1, "Text file (*.txt)\0*.txt\0", "txt", path, MAX_PATH, 0)) return;
+    if (graphic) ea_eq_export_geq(&g_m, text, (int)sizeof text); else ea_eq_export_apo(&g_m, text, (int)sizeof text);
+    f = fopen(path, "wb");
+    if (!f) { MessageBoxA(g_wnd, "That file could not be written.", "EasyAmp", MB_ICONWARNING); return; }
+    fputs(text, f);
+    fclose(f);
 }
 
 /* ---- actions from the UI ------------------------------------------------------------ */
@@ -711,6 +839,9 @@ static void on_command(void *ctx, int cmd)
         break;
     case EA_CMD_SRC_PLAY: collect(1); break;
     case EA_CMD_SRC_ADD:  collect(0); break;
+    case EA_CMD_EQ_IMPORT:     eq_import_file(); break;
+    case EA_CMD_EQ_EXPORT_APO: eq_export_file(0); break;
+    case EA_CMD_EQ_EXPORT_GEQ: eq_export_file(1); break;
     case EA_CMD_WIN_MINIMIZE: ShowWindow(g_wnd, SW_MINIMIZE); break;
     case EA_CMD_WIN_CLOSE:    PostMessageA(g_wnd, WM_CLOSE, 0, 0); break;
     case EA_CMD_OPEN_UPDATE:  ShellExecuteA(g_wnd, "open", "https://www.easyampstereo.com/download.html", 0, 0, SW_SHOWNORMAL); break;
@@ -928,7 +1059,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ui_model_changed(g_ui, UI_CH_PLAYLIST);
         if (g_m.state == EA_STOPPED && g_m.ntracks > first) play_index(0, first);
         return 0; }
-    case WM_DESTROY: KillTimer(h, TIMER_ID); PostQuitMessage(0); return 0;
+    case WM_ENDSESSION: if (wp) state_save(); return 0;          /* Windows is shutting down */
+    case WM_DESTROY: state_save(); KillTimer(h, TIMER_ID); PostQuitMessage(0); return 0;
     }
     return DefWindowProcA(h, msg, wp, lp);
 }
@@ -938,7 +1070,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     WNDCLASSA wc;
     ea_actions act;
     MSG msg;
-    int i, sx, sy, page = 0, autoplay = 0;
+    int i, sx, sy, page = 0, autoplay = 0, wx = -32000, wy = -32000, cmd_page = -1;
     (void)prev; (void)cmdline;
 
     ea_model_init(&g_m);
@@ -948,11 +1080,16 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     g_eng = eng_create();
     if (!g_ui || !g_eng) { MessageBoxA(0, "Out of memory.", "EasyAmp", MB_ICONERROR); return 1; }
 
+    for (i = 1; i < __argc; i++) if (!strcmp(__argv[i], "/nostate")) g_nostate = 1;
+    ini_path();
+    state_load(&page, &wx, &wy);
+    { int saved = g_m.ntracks; (void)saved; }
     for (i = 1; i < __argc; i++) {
         const char *a = __argv[i];
         if (!strncmp(a, "/shot:", 6)) { strncpy(g_shot, a + 6, MAX_PATH - 1); if (!g_shot_at) g_shot_at = 1500; }
         else if (!strncmp(a, "/shotms:", 8)) g_shot_at = (DWORD)atoi(a + 8);
-        else if (!strncmp(a, "/page:", 6)) page = atoi(a + 6);
+        else if (!strncmp(a, "/page:", 6)) cmd_page = atoi(a + 6);
+        else if (!strcmp(a, "/nostate")) g_nostate = 1;
         else if (!strncmp(a, "/depth:", 7)) g_force_depth = atoi(a + 7);      /* 32, 16, 15, 8, 4: try a colour path on any desktop */
         else if (!strncmp(a, "/preset:", 8)) { int p = atoi(a + 8); if (p >= 0 && p < ea_preset_count()) ea_preset_apply(&g_m, p); }
         else if (!strncmp(a, "/vu", 3)) g_m.viz_vu = 1;
@@ -960,7 +1097,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             if ((c1 = strchr(t, ',')) != 0 && (c2 = strchr(c1 + 1, ',')) != 0) { *c1 = 0; *c2 = 0; strcpy(g_auto_jf[0], t); strcpy(g_auto_jf[1], c1 + 1); strcpy(g_auto_jf[2], c2 + 1); } }
         else if (!strncmp(a, "/acct:", 6)) g_want_acct = atoi(a + 6);
         else if (!strncmp(a, "/open:", 6)) { const char *q = a + 6; while (*q && g_script_n < 8) { g_script[g_script_n++] = atoi(q); q = strchr(q, ','); if (!q) break; q++; } }
-        else { const char *dot = strrchr(a, '.'); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
+        else { const char *dot = strrchr(a, '.'); if (!autoplay) pl_clear(); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
     }
     eng_set_dsp(g_eng, &g_m);
     net_init();
@@ -974,8 +1111,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wc.hIcon = LoadIconA(inst, MAKEINTRESOURCEA(1));
     if (!RegisterClassA(&wc)) return 1;
     sx = (GetSystemMetrics(SM_CXSCREEN) - EA_WIN_W) / 2; sy = (GetSystemMetrics(SM_CYSCREEN) - EA_WIN_H) / 2;
+    /* the remembered position, unless the screen has since shrunk under it */
+    if (wx > -EA_WIN_W + 80 && wy > -20 && wx < GetSystemMetrics(SM_CXSCREEN) - 80 && wy < GetSystemMetrics(SM_CYSCREEN) - 40) { sx = wx; sy = wy; }
+    if (cmd_page >= 0) page = cmd_page;
     g_wnd = CreateWindowExA(WS_EX_ACCEPTFILES, "EasyAmpRetro", "EasyAmp", WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
-                            sx < 0 ? 0 : sx, sy < 0 ? 0 : sy, EA_WIN_W, EA_WIN_H, 0, 0, inst, 0);
+                            sx, sy < 0 ? 0 : sy, EA_WIN_W, EA_WIN_H, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     ui_set_page(g_ui, page);
     if (autoplay && g_m.ntracks) play_index(0, 0);

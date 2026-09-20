@@ -42,7 +42,10 @@ void chain_config(ea_chain *c, const ea_model *m)
     int i;
     c->eq_on = m->eq_on;
     c->nbands = m->nbands;
-    for (i = 0; i < m->nbands; i++) peak(&c->band[i], fs, m->freqs[i], m->q[i] > 0.1f ? m->q[i] : 0.1f, m->gains[i]);
+    for (i = 0; i < m->nbands; i++) {
+        if (m->types[i] == EA_PEAK) peak(&c->band[i], fs, m->freqs[i], m->q[i] > 0.1f ? m->q[i] : 0.1f, m->gains[i]);
+        else { shelf(&c->band[i], fs, m->freqs[i], m->gains[i], m->types[i] == EA_HIGH_SHELF); if (m->freqs[i] >= fs * 0.49f) c->band[i].active = 0; }
+    }
     for (; i < EA_MAX_BANDS; i++) { c->band[i].active = 0; memset(c->band[i].z1, 0, sizeof c->band[i].z1); memset(c->band[i].z2, 0, sizeof c->band[i].z2); }
     /* same voicing as the GTK app: BASS = +6 dB low, LOUD = +4 dB low and high */
     shelf(&c->low, fs, 110.0f, (m->bass ? 6.0f : 0.0f) + (m->loud ? 4.0f : 0.0f), 0);

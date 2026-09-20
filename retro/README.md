@@ -22,7 +22,7 @@ preset roster, same playlist format, written from scratch in C.
 | Playback | `src/engine_win32.c` | Worker thread: minimp3 / PCM WAV → varispeed → DSP → `waveOut`. Meters are analysed at the position the card is actually playing. |
 | Shell | `src/main_win32.c` | Borderless window, file dialogs, drag and drop, ID3 titles, m3u. |
 
-## Plex
+## Plex and Jellyfin
 
 ![sources](docs/retro-sources.png)
 ![link](docs/retro-plex-link.png)
@@ -42,7 +42,15 @@ streams cannot seek. If Windows cannot resolve a name the client asks
 1.1.1.1 / 8.8.8.8 itself, because retro boxes often carry a DNS setting that
 died years ago. Names are folded from UTF-8 to the ASCII the fonts carry.
 
-The account token is saved in `EASYAMP.INI` beside the exe **in plain
+Jellyfin is a typed sign-in (server address, user, password) against
+`/Users/AuthenticateByName`; tracks use `/Audio/<id>/universal` with MP3 as
+the only container the client claims, so the server sends MP3 as-is and
+transcodes the rest. The password is never stored and is wiped from memory
+after sign-in.
+
+![jellyfin](docs/retro-jellyfin-signin.png)
+
+Account tokens are saved in `EASYAMP.INI` beside the exe **in plain
 text**: Windows 98 has no protected store. Unlink with REM, or revoke the
 device in Plex > Settings > Authorized Devices.
 
@@ -91,19 +99,37 @@ under Wine.
 
 ## Status
 
-Working: both main pages, transport, seek, playlist (add / remove / clear /
-m3u load + save / drag and drop), 10–32 band parametric EQ with presets,
-BASS / LOUD, balance, varispeed pitch, spectrum / VU / scope / LED meters,
-MP3 + WAV.
+Verified on real hardware: an HP Pavilion 6460 (Windows 98 SE, Celeron 400,
+256-colour desktop) and a Windows XP SP3 box.
 
-Plex: link, browse, stream, transcode (above).
+- Player, Equalizer and Sources pages; transport, seek, keyboard.
+- Local MP3, FLAC, Ogg Vorbis and PCM WAV. Drag and drop, m3u load / save.
+- 10-32 band parametric EQ with presets, shelves, BASS / LOUD, balance,
+  varispeed pitch. IMPORT / EXPORT read and write the GTK app's formats:
+  Equalizer APO config files and the AutoEQ `GraphicEQ:` line.
+- Spectrum / VU / scope / LED meters.
+- Plex and Jellyfin, up to four accounts at once (see below).
+- The EQ and PL buttons hide their panels and the page reflows.
+- Settings, the EQ bank, the window position and the playlist are kept
+  between runs in `EASYAMP.INI` / `EASYAMP.M3U` beside the exe.
 
-Not yet: Jellyfin (the button is there and says so - PRs welcome), APO
-import / export, saving the EQ and playlist between runs, local FLAC / Ogg.
+Not yet: a 2x window for large monitors, album art, gapless playback.
+
+## Things that will bite you
+
+- **An import Windows 98 lacks is fatal, not degraded**: the loader refuses
+  to start the program. `make win` runs `tools/check-imports.sh` and deletes
+  the exe if it finds one. It has caught two so far: `_strtoi64` (one
+  `sscanf` call pulls in mingw's scanf) and `_ftelli64` (dr_flac's stdio
+  layer - it is fed through callbacks instead).
+- The fonts are ASCII. Metadata is folded from UTF-8 (`json.c`).
+- Anything a human must TYPE elsewhere cannot use the skin's pixel font:
+  Pixelify draws 2/Z, 5/S, 8/B and 0/O identically.
 
 ## Third party
 
 `third_party/minimp3.h` — lieff/minimp3, CC0. `third_party/jsmn.h` — zserge/jsmn, MIT.
+`third_party/dr_flac.h` — mackron/dr_libs, public domain / MIT-0. `third_party/stb_vorbis.c` — nothings/stb, public domain / MIT.
 BearSSL — Thomas Pornin, MIT, fetched by `tools/fetch-bearssl.sh`.
 Fonts: DSEG7 Classic and Pixelify Sans, SIL OFL (see `easyamp/fonts/`). The Plex link code alone
 is drawn in DejaVu Sans Mono Bold (Bitstream Vera licence): Pixelify draws 2/Z, 5/S, 8/B and 0/O

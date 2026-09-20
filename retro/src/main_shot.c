@@ -131,6 +131,10 @@ int main(int argc, char **argv)
     ui_mouse_move(ui, 110, 290); ui_mouse_down(ui, 110, 290);    /* hold stop down */
     shot(ui, dir, "player-long-paused-pressed");
     ui_mouse_up(ui, 110, 290);
+    m.show_eq = 0; ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "player-no-eq");
+    m.show_pl = 0; m.viz_vu = 1; ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "player-no-eq-no-pl-vu");
+    m.show_eq = 1; m.viz_vu = 0; ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "player-no-pl");
+    m.show_pl = 1; ui_model_changed(ui, UI_CH_ALL);
     ui_set_page(ui, EA_PAGE_EQ);
     shot(ui, dir, "equalizer");
     shot_indexed(ui, dir, "equalizer-256", EA_PAL256, EA_LUT256, 20);
