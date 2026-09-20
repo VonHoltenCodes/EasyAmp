@@ -105,4 +105,6 @@ import / export, saving the EQ and playlist between runs, local FLAC / Ogg.
 
 `third_party/minimp3.h` — lieff/minimp3, CC0. `third_party/jsmn.h` — zserge/jsmn, MIT.
 BearSSL — Thomas Pornin, MIT, fetched by `tools/fetch-bearssl.sh`.
-Fonts: DSEG7 Classic and Pixelify Sans, SIL OFL (see `easyamp/fonts/`).
+Fonts: DSEG7 Classic and Pixelify Sans, SIL OFL (see `easyamp/fonts/`). The Plex link code alone
+is drawn in DejaVu Sans Mono Bold (Bitstream Vera licence): Pixelify draws 2/Z, 5/S, 8/B and 0/O
+as the same shape, and that string is typed by hand into a phone.

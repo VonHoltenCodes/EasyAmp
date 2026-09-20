@@ -22,6 +22,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FONTS = os.path.join(HERE, "..", "..", "easyamp", "fonts")
 PIXELIFY = os.path.join(FONTS, "PixelifySans.ttf")
 DSEG7 = os.path.join(FONTS, "DSEG7Classic-Regular.ttf")
+# The Plex link code is typed by a human into a phone, so it must be
+# unambiguous - and Pixelify Sans draws 2/Z, 5/S, 8/B and 0/O as the SAME
+# shape (6/G nearly). DejaVu Sans Mono Bold has a slashed zero and distinct
+# forms for every one of those pairs. Bitstream Vera licence: free to embed.
+DEJAVU_MONO_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 
 ASCII = "".join(chr(c) for c in range(32, 127))
 
@@ -36,7 +41,7 @@ FACES = [
     ("CTL",   PIXELIFY, 10, 400, [(2.5, 0.50)], ASCII),
     ("SMALL", PIXELIFY, 10, 400, [], ASCII),
     ("SYM",   PIXELIFY, 16, 700, [], "+-x"),
-    ("LINK",  PIXELIFY, 30, 400, [(4.0, 0.85)], ASCII),
+    ("CODE",  DEJAVU_MONO_BOLD, 32, None, [(4.0, 0.85)], "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"),
     ("BIG",   DSEG7,    32, None, [(5.0, 0.90), (1.3, 1.0)], "0123456789:-. "),
 ]
 

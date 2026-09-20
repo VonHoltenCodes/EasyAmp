@@ -921,10 +921,12 @@ static void draw_linkdlg(ea_ui *ui, int cancel_hover, int cancel_down)
     text_center(s, &EA_FONT_LCD, &line, "plex.tv/link", C_WHITE, 1, 0);
     line.y += 18;
     text_center(s, &EA_FONT_TRACK, &line, "and enter this code:", EA_RGB(0xb8, 0xc0, 0xd4), 0, 0);
-    cw = gfx_text_w(&EA_FONT_LINK, ui->m->link_code[0] ? ui->m->link_code : "----", 8) - 8;
-    gfx_text(s, &EA_FONT_LINK, r->x + (r->w - cw) / 2, r->y + 106, ui->m->link_code[0] ? ui->m->link_code : "----",
-             C_LCD_ON, 8, GFX_GLOW, C_LCD_ON);
-    line.y = r->y + 120;
+    /* NOT the skin's pixel font: it draws 2/Z, 5/S, 8/B and 0/O identically,
+     * and this string is typed by hand into a phone */
+    cw = gfx_text_w(&EA_FONT_CODE, ui->m->link_code[0] ? ui->m->link_code : "----", 10) - 10;
+    gfx_text(s, &EA_FONT_CODE, r->x + (r->w - cw) / 2, r->y + 108, ui->m->link_code[0] ? ui->m->link_code : "----",
+             C_LCD_ON, 10, GFX_GLOW, C_LCD_ON);
+    line.y = r->y + 122;
     text_center(s, &EA_FONT_IND, &line, ui->m->link_status, C_LCD_ON, 1, 0);
     button_face(s, &btn, cancel_hover, cancel_down);
     cw = gfx_text_w(&EA_FONT_BTN, "CANCEL", 1) - 1;

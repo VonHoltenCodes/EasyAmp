@@ -140,10 +140,12 @@ int main(int argc, char **argv)
     shot(ui, dir, "equalizer-24");
     ui_set_page(ui, EA_PAGE_SOURCES);
     shot(ui, dir, "sources");
-    m.link_open = 1; strcpy(m.link_code, "B62Y"); strcpy(m.link_status, "WAITING FOR APPROVAL...");
+    m.link_open = 1; strcpy(m.link_code, "B8Z2"); strcpy(m.link_status, "WAITING FOR APPROVAL...");
     ui_model_changed(ui, UI_CH_SOURCES);
     ui_mouse_move(ui, 360, 350);
     shot(ui, dir, "sources-link");
+    strcpy(m.link_code, "S5O0"); ui_model_changed(ui, UI_CH_SOURCES); shot(ui, dir, "sources-link-2");
+    strcpy(m.link_code, "G6I1"); ui_model_changed(ui, UI_CH_SOURCES); shot(ui, dir, "sources-link-3");
     {
         static ea_srcitem lib[60];
         static const char *names[] = { "AC/DC", "Aerosmith", "Alice in Chains", "The Beatles", "Beyonce", "Black Sabbath", "Blondie",

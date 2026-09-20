@@ -12,7 +12,7 @@ extern const ea_font EA_FONT_BTN;
 extern const ea_font EA_FONT_CTL;
 extern const ea_font EA_FONT_SMALL;
 extern const ea_font EA_FONT_SYM;
-extern const ea_font EA_FONT_LINK;
+extern const ea_font EA_FONT_CODE;
 extern const ea_font EA_FONT_BIG;
 
 #endif
