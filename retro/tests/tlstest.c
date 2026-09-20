@@ -1,15 +1,14 @@
 /* tlstest - the make-or-break check for Plex on Windows 98: can this machine
  * complete a TLS 1.2 handshake with plex.tv and get a link code back?
- * Writes TLSTEST.TXT beside itself and, when the dev box is reachable, posts
- * the same report to its upload endpoint so nobody has to read a console. */
+ * Writes TLSTEST.TXT beside itself. Given an upload URL it also posts the
+ * report there as a multipart form, so nobody has to read a console on the
+ * old machine:   TLSTEST.EXE http://192.168.1.10:8089/ */
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include "../src/net.h"
 
-#define UPLOAD "http://192.168.68.72:8089/"
-
-int main(void)
+int main(int argc, char **argv)
 {
     static char report[4096], body[5000];
     char diag[160], host[64] = "unknown", head[128];
@@ -47,8 +46,10 @@ int main(void)
 
     sprintf(body, "--EAB\r\nContent-Disposition: form-data; name=\"f\"; filename=\"TLSTEST-%s.TXT\"\r\nContent-Type: text/plain\r\n\r\n%s\r\n--EAB--\r\n", host, report);
     strcpy(head, "Content-Type: multipart/form-data; boundary=EAB\r\n");
-    printf("report %s\n", net_request("POST", UPLOAD, head, body, &up, 6000) == 200 ? "sent to devbase1" : "NOT sent (dev box unreachable) - see TLSTEST.TXT");
-    net_free(&up);
+    if (argc > 1) {
+        printf("report %s\n", net_request("POST", argv[1], head, body, &up, 6000) == 200 ? "uploaded" : "NOT uploaded - see TLSTEST.TXT");
+        net_free(&up);
+    }
     Sleep(2500);                                   /* leave the console readable for a moment */
     return pass ? 0 : 1;
 }

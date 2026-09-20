@@ -155,15 +155,15 @@ int main(int argc, char **argv)
         static const char *names[] = { "AC/DC", "Aerosmith", "Alice in Chains", "The Beatles", "Beyonce", "Black Sabbath", "Blondie",
             "Bob Dylan", "Creedence Clearwater Revival", "David Bowie", "Deep Purple", "Dire Straits", "The Doors", "Eagles" };
         m.link_open = 0; m.form_open = 1; m.form_focus = 2;
-        strcpy(m.form_field[0], "192.168.68.72:8096"); strcpy(m.form_field[1], "trent"); strcpy(m.form_field[2], "secret99");
+        strcpy(m.form_field[0], "192.168.1.5:8096"); strcpy(m.form_field[1], "music"); strcpy(m.form_field[2], "password");
         strcpy(m.form_status, "SIGNING IN...");
         ui_model_changed(ui, UI_CH_SOURCES); ui_tick(ui, 500); ui_mouse_move(ui, 300, 390);
         shot(ui, dir, "sources-jellyfin-form");
         m.form_open = 0;
         m.naccts = 2; m.acct_sel = 0;
-        strcpy(m.accts[0].name, "Plex  starbase1"); m.accts[0].state = EA_SRC_OK;
+        strcpy(m.accts[0].name, "Plex  home-server"); m.accts[0].state = EA_SRC_OK;
         strcpy(m.accts[1].name, "Jellyfin  attic-nas"); m.accts[1].state = EA_SRC_UNREACHABLE;
-        strcpy(m.src_crumb, "STARBASE1 > MUSIC"); strcpy(m.src_status, "60 ARTISTS");
+        strcpy(m.src_crumb, "HOME-SERVER > MUSIC"); strcpy(m.src_status, "60 ARTISTS");
         for (i = 0; i < 60; i++) { sprintf(lib[i].name, "%s%s", names[i % 14], i >= 14 ? " (more)" : ""); lib[i].container = 1; }
         m.src_items = lib; m.src_nitems = 60; m.src_sel = 1;
         lib[1].marked = lib[3].marked = lib[4].marked = lib[5].marked = lib[9].marked = 1; strcpy(m.src_status, "5 SELECTED");
