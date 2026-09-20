@@ -23,7 +23,8 @@ void net_free(ea_http *r);
 /* one line for diagnostics: how names resolved, whether the OS RNG answered */
 void net_diag(char *out, int cap);
 
-/* a byte stream over plain HTTP, for playback. Range-capable servers can seek. */
+/* a byte stream over HTTP or HTTPS, for playback; follows redirects.
+ * Range-capable servers can seek. */
 typedef struct ea_stream ea_stream;
 ea_stream *net_stream_open(const char *url, long offset, long *total_len, char *err, int errcap);
 int        net_stream_read(ea_stream *s, void *buf, int n);   /* 0 = end, <0 = error */

@@ -49,6 +49,7 @@ void ui_mouse_dbl(ea_ui *ui, int x, int y);
 void ui_mouse_leave(ea_ui *ui);
 void ui_wheel(ea_ui *ui, int x, int y, int notches);
 void ui_key(ea_ui *ui, int key);
+void ui_char(ea_ui *ui, int ch);                      /* typed text, for the sign-in form */
 int  ui_is_caption(ea_ui *ui, int x, int y);         /* draggable title area */
 int  ui_wants_capture(ea_ui *ui);
 

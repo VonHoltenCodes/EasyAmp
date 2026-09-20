@@ -12,6 +12,7 @@
 #include "engine.h"
 #include "net.h"
 #include "plex.h"
+#include "source.h"
 #include "ui.h"
 
 #ifndef WM_MOUSEWHEEL
@@ -107,7 +108,7 @@ static void read_title(const char *path, char *out, int cap)
     if (dot) *(char *)dot = 0;
 }
 
-static int is_url(const char *path) { return !strncmp(path, "http://", 7); }
+static int is_url(const char *path) { return !strncmp(path, "http://", 7) || !strncmp(path, "https://", 8); }
 
 static int playable(const char *path)
 {
@@ -207,38 +208,44 @@ static void m3u_save(const char *path)
     fclose(f);
 }
 
-/* ---- Plex ------------------------------------------------------------------------------
- * Network calls block (a TLS handshake is seconds on a Celeron), so each one
- * runs as a job on a worker thread; frame() picks the result up. One job at a
- * time. The account token and server live in EASYAMP.INI beside the exe:
- * plain text, because Windows 98 has no protected store to put them in. */
+/* ---- sources (Plex, Jellyfin) ------------------------------------------------------------
+ * Network calls block (a TLS handshake, a slow server), so each one runs as a
+ * job on a worker thread; frame() picks the result up. One job at a time.
+ * Accounts live in EASYAMP.INI beside the exe, tokens in plain text: Windows
+ * 98 has no protected store to put them in. Passwords are never saved. */
 
-enum { JOB_NONE, JOB_LINK, JOB_RECONNECT, JOB_BROWSE, JOB_COLLECT };
+enum { JOB_NONE, JOB_LINK, JOB_SIGNIN, JOB_RECONNECT, JOB_BROWSE, JOB_COLLECT };
 
 typedef struct {
     int kind;
     volatile LONG done, cancel, code_ready;
     HANDLE thread;
     /* in */
-    char node[64], label[128];
-    int row_kind, then_play;
+    ea_source src;                                  /* a COPY: the worker never touches g_src */
+    char node[96], field[3][128];
+    int then_play;
     /* out */
-    char code[8], status[96], err[200], token[80];
-    plex_server srv;
-    int ok;
-    plex_item *items;
+    char code[8], status[96], err[200];
+    ea_source result;
+    int ok, alive[EA_MAX_SOURCES];
+    ea_sitem *items;
     int nitems;
 } job_t;
 
-#define MAX_DEPTH 5
-static job_t       g_job;
-static char        g_ini[MAX_PATH], g_client[64], g_token[80];
-static plex_server g_srv;
-static int         g_linked;
-static plex_item  *g_lib;                       /* the level on screen */
-static int         g_nlib, g_depth;
-static int         g_script[8], g_script_n, g_script_pos;   /* /open:1,0,2 - rows to open as levels load (testing) */
-static char        g_nodes[MAX_DEPTH][64], g_names[MAX_DEPTH][128];
+#define MAX_DEPTH 6
+#define COLLECT_CAP 3000
+static job_t     g_job;
+static char      g_ini[MAX_PATH], g_client[64];
+static ea_source g_src[EA_MAX_SOURCES];
+static int       g_nsrc;
+static ea_sitem *g_lib;                             /* the level on screen */
+static int       g_nlib, g_depth;
+static char      g_nodes[MAX_DEPTH][96], g_names[MAX_DEPTH][128];
+static int       g_script[8], g_script_n, g_script_pos;   /* /open:1,0,2 - rows to open as levels load (testing) */
+static int       g_want_acct = -1;                        /* /acct:N - which saved account to open at startup (testing) */
+static char      g_auto_jf[3][128];                       /* /jf:server,user,pass - sign in at startup (testing) */
+
+static void on_src_open(void *ctx, int idx);
 
 static void ini_path(void)
 {
@@ -248,105 +255,148 @@ static void ini_path(void)
     strcpy(slash ? slash + 1 : g_ini, "EASYAMP.INI");
 }
 
-static void plex_load(void)
+static void accounts_to_model(void)
 {
+    int i;
+    g_m.naccts = g_nsrc;
+    for (i = 0; i < g_nsrc; i++) _snprintf(g_m.accts[i].name, sizeof g_m.accts[i].name, "%s  %s", source_type_name(g_src[i].type), g_src[i].name);
+    if (g_m.acct_sel >= g_nsrc) g_m.acct_sel = g_nsrc - 1;
+    if (g_m.acct_sel < 0 && g_nsrc) g_m.acct_sel = 0;
+}
+
+static void sources_save(void)
+{
+    char sec[16], num[8];
+    int i;
+    for (i = 0; i < EA_MAX_SOURCES; i++) {
+        sprintf(sec, "source%d", i);
+        WritePrivateProfileStringA(sec, 0, 0, g_ini);                       /* drop the section, then rewrite it */
+        if (i >= g_nsrc) continue;
+        sprintf(num, "%d", g_src[i].type);
+        WritePrivateProfileStringA(sec, "type", num, g_ini);
+        WritePrivateProfileStringA(sec, "name", g_src[i].name, g_ini);
+        WritePrivateProfileStringA(sec, "base", g_src[i].base, g_ini);
+        WritePrivateProfileStringA(sec, "token", g_src[i].token, g_ini);
+        WritePrivateProfileStringA(sec, "acct", g_src[i].acct, g_ini);
+        WritePrivateProfileStringA(sec, "user_id", g_src[i].user_id, g_ini);
+    }
+}
+
+static void sources_load(void)
+{
+    char sec[16];
+    int i;
     ini_path();
     GetPrivateProfileStringA("plex", "client", "", g_client, sizeof g_client, g_ini);
     if (!g_client[0]) {
         sprintf(g_client, "easyamp-retro-%08lx%04x", (unsigned long)GetTickCount(), (unsigned)(GetCurrentProcessId() & 0xffff));
         WritePrivateProfileStringA("plex", "client", g_client, g_ini);
     }
-    GetPrivateProfileStringA("plex", "token", "", g_token, sizeof g_token, g_ini);
-    GetPrivateProfileStringA("plex", "server_name", "", g_srv.name, sizeof g_srv.name, g_ini);
-    GetPrivateProfileStringA("plex", "server_base", "", g_srv.base, sizeof g_srv.base, g_ini);
-    GetPrivateProfileStringA("plex", "server_token", "", g_srv.token, sizeof g_srv.token, g_ini);
-    g_linked = g_token[0] && g_srv.base[0];
+    for (i = 0; i < EA_MAX_SOURCES; i++) {
+        ea_source *c = &g_src[g_nsrc];
+        sprintf(sec, "source%d", i);
+        memset(c, 0, sizeof *c);
+        GetPrivateProfileStringA(sec, "base", "", c->base, sizeof c->base, g_ini);
+        GetPrivateProfileStringA(sec, "token", "", c->token, sizeof c->token, g_ini);
+        if (!c->base[0] || !c->token[0]) continue;
+        c->type = (int)GetPrivateProfileIntA(sec, "type", 0, g_ini);
+        GetPrivateProfileStringA(sec, "name", "server", c->name, sizeof c->name, g_ini);
+        GetPrivateProfileStringA(sec, "acct", "", c->acct, sizeof c->acct, g_ini);
+        GetPrivateProfileStringA(sec, "user_id", "", c->user_id, sizeof c->user_id, g_ini);
+        g_nsrc++;
+    }
+    if (!g_nsrc) {                                                       /* a 0.2.0 / 0.2.1 link lived in [plex] */
+        ea_source *c = &g_src[0];
+        memset(c, 0, sizeof *c);
+        GetPrivateProfileStringA("plex", "server_base", "", c->base, sizeof c->base, g_ini);
+        GetPrivateProfileStringA("plex", "server_token", "", c->token, sizeof c->token, g_ini);
+        GetPrivateProfileStringA("plex", "token", "", c->acct, sizeof c->acct, g_ini);
+        GetPrivateProfileStringA("plex", "server_name", "server", c->name, sizeof c->name, g_ini);
+        if (c->base[0] && c->token[0]) { c->type = SOURCE_PLEX; g_nsrc = 1; sources_save(); }
+    }
+    accounts_to_model();
 }
 
-static void plex_save(void)
-{
-    WritePrivateProfileStringA("plex", "token", g_linked ? g_token : 0, g_ini);
-    WritePrivateProfileStringA("plex", "server_name", g_linked ? g_srv.name : 0, g_ini);
-    WritePrivateProfileStringA("plex", "server_base", g_linked ? g_srv.base : 0, g_ini);
-    WritePrivateProfileStringA("plex", "server_token", g_linked ? g_srv.token : 0, g_ini);
-}
-
-/* the stored playlist URL carries no token; add it for our own server */
+/* the stored playlist URL carries no credentials; add them for the server that owns it */
 static void plex_play_url(const char *stored, char *out, int cap)
 {
-    size_t bl = strlen(g_srv.base);
-    if (g_linked && bl && !strncmp(stored, g_srv.base, bl) && !strstr(stored, "X-Plex-Token=")) plex_auth_url(&g_srv, stored, out, cap);
-    else { strncpy(out, stored, (size_t)cap - 1); out[cap - 1] = 0; }
+    int i;
+    for (i = 0; i < g_nsrc; i++)
+        if (source_owns_url(&g_src[i], stored) && !strstr(stored, "X-Plex-Token=") && !strstr(stored, "api_key=")) { source_auth_url(&g_src[i], stored, out, cap); return; }
+    strncpy(out, stored, (size_t)cap - 1); out[cap - 1] = 0;
 }
 
-/* an MP3 plays straight off the server; anything else is asked for as MP3 */
-static void plex_item_url(const plex_item *t, char *out, int cap)
+static void append_items(job_t *j, const ea_sitem *more, int n)
 {
-    if (!t->codec[0] || !lstrcmpiA(t->codec, "mp3")) { plex_track_url(&g_srv, t, out, cap); return; }
-    _snprintf(out, (size_t)cap, "%s/music/:/transcode/universal/start.mp3?path=%%2Flibrary%%2Fmetadata%%2F%s&mediaIndex=0&partIndex=0"
-              "&protocol=http&directPlay=0&directStream=0&audioCodec=mp3&maxAudioBitrate=192&X-Plex-Platform=Chrome"
-              "&X-Plex-Client-Identifier=%s&X-Plex-Session-Identifier=%s-%s"
-              "&X-Plex-Client-Profile-Extra=add-transcode-target%%28type%%3DmusicProfile%%26context%%3Dstreaming%%26protocol%%3Dhttp%%26container%%3Dmp3%%26audioCodec%%3Dmp3%%29",
-              g_srv.base, t->key, g_client, g_client, t->key);
-    out[cap - 1] = 0;
+    ea_sitem *grown = (ea_sitem *)realloc(j->items, sizeof(ea_sitem) * (size_t)(j->nitems + (n > 0 ? n : 1)));
+    if (!grown) return;
+    j->items = grown;
+    if (n > 0) { memcpy(grown + j->nitems, more, sizeof(ea_sitem) * (size_t)n); j->nitems += n; }
 }
 
-static void append_items(job_t *j, plex_item *more, int n)
+/* every track under a folder, whatever the server calls its levels */
+static void collect_node(job_t *j, const char *node, int depth)
 {
-    plex_item *grown;
-    if (!more || n <= 0) { free(more); return; }
-    grown = (plex_item *)realloc(j->items, sizeof(plex_item) * (size_t)(j->nitems + n));
-    if (grown) { memcpy(grown + j->nitems, more, sizeof(plex_item) * (size_t)n); j->items = grown; j->nitems += n; }
-    free(more);
+    ea_sitem *it;
+    int n = 0, i;
+    if (depth > 4 || j->cancel || j->nitems >= COLLECT_CAP) return;
+    it = source_browse(&j->src, g_client, node, &n, j->err, (int)sizeof j->err);
+    if (!it) return;
+    j->ok = 1;
+    for (i = 0; i < n && j->nitems < COLLECT_CAP; i++) {
+        if (it[i].is_track) append_items(j, &it[i], 1);
+        else collect_node(j, it[i].node, depth + 1);
+    }
+    free(it);
 }
 
 static DWORD WINAPI job_thread(LPVOID arg)
 {
     job_t *j = (job_t *)arg;
     long pin = 0;
-    int i, n;
+    int i;
     switch (j->kind) {
-    case JOB_LINK:
+    case JOB_LINK: {
+        char token[96] = "";
+        plex_server ps;
         strcpy(j->status, "CONTACTING PLEX.TV...");
         if (!plex_pin_start(g_client, &pin, j->code, j->err, sizeof j->err)) break;
         strcpy(j->status, "WAITING FOR APPROVAL...");
         InterlockedExchange(&j->code_ready, 1);
         for (i = 0; i < 450 && !j->cancel; i++) {               /* codes last about 15 minutes */
-            int r = plex_pin_poll(g_client, pin, j->token, sizeof j->token, j->err, sizeof j->err), k;
+            int r = plex_pin_poll(g_client, pin, token, sizeof token, j->err, sizeof j->err), k;
             if (r < 0) break;
             if (r == 1) {
                 strcpy(j->status, "LINKED - FINDING YOUR SERVER...");
-                j->ok = plex_discover(g_client, j->token, &j->srv, 1, j->err, sizeof j->err) > 0;
+                if (plex_discover(g_client, token, &ps, 1, j->err, sizeof j->err) > 0) {
+                    memset(&j->result, 0, sizeof j->result);
+                    j->result.type = SOURCE_PLEX;
+                    strncpy(j->result.name, ps.name, sizeof j->result.name - 1);
+                    strncpy(j->result.base, ps.base, sizeof j->result.base - 1);
+                    strncpy(j->result.token, ps.token, sizeof j->result.token - 1);
+                    strncpy(j->result.acct, token, sizeof j->result.acct - 1);
+                    j->ok = 1;
+                }
                 break;
             }
             for (k = 0; k < 20 && !j->cancel; k++) Sleep(100);
         }
         if (!j->ok && !j->err[0] && !j->cancel) strcpy(j->err, "code expired - try again");
+        break; }
+    case JOB_SIGNIN:
+        j->ok = jellyfin_sign_in(j->field[0], g_client, j->field[1], j->field[2], &j->result, j->err, sizeof j->err);
+        memset(j->field[2], 0, sizeof j->field[2]);              /* the password is not kept anywhere */
         break;
-    case JOB_RECONNECT:                                          /* startup: is the saved server still there? */
-        j->srv = g_srv;
-        j->ok = plex_alive(&j->srv);
-        if (!j->ok) j->ok = plex_discover(g_client, g_token, &j->srv, 1, j->err, sizeof j->err) > 0;
+    case JOB_RECONNECT:                                          /* startup: which saved servers still answer? */
+        for (i = 0; i < g_nsrc && !j->cancel; i++) j->alive[i] = source_alive(&g_src[i], g_client);
+        j->ok = 1;
         break;
     case JOB_BROWSE:
-        j->items = plex_browse(&g_srv, g_client, j->node, &j->nitems, j->err, sizeof j->err);
+        j->items = source_browse(&j->src, g_client, j->node, &j->nitems, j->err, sizeof j->err);
         j->ok = j->items != 0;
         break;
-    case JOB_COLLECT:                                            /* every track under an album or an artist */
-        if (j->row_kind == PLEX_ALBUM) { plex_item *t = plex_browse(&g_srv, g_client, j->node, &n, j->err, sizeof j->err); j->ok = t != 0; append_items(j, t, n); }
-        else {
-            int na = 0;
-            plex_item *albums = plex_browse(&g_srv, g_client, j->node, &na, j->err, sizeof j->err);
-            j->ok = albums != 0;
-            for (i = 0; albums && i < na && !j->cancel; i++) {
-                char node[64];
-                plex_item *t;
-                sprintf(node, "album/%s", albums[i].key);
-                t = plex_browse(&g_srv, g_client, node, &n, j->err, sizeof j->err);
-                append_items(j, t, n);
-            }
-            free(albums);
-        }
+    case JOB_COLLECT:
+        collect_node(j, j->node, 0);
         break;
     }
     InterlockedExchange(&j->done, 1);
@@ -356,11 +406,12 @@ static DWORD WINAPI job_thread(LPVOID arg)
 static int job_start(int kind)
 {
     DWORD tid;
+    job_t keep;
     if (g_job.kind != JOB_NONE) return 0;                        /* one at a time */
-    { char node[64], label[128]; int rk = g_job.row_kind, tp = g_job.then_play;
-      strcpy(node, g_job.node); strcpy(label, g_job.label);
-      memset(&g_job, 0, sizeof g_job);
-      strcpy(g_job.node, node); strcpy(g_job.label, label); g_job.row_kind = rk; g_job.then_play = tp; }
+    keep = g_job;
+    memset(&g_job, 0, sizeof g_job);
+    strcpy(g_job.node, keep.node); g_job.then_play = keep.then_play; g_job.src = keep.src;
+    memcpy(g_job.field, keep.field, sizeof g_job.field);
     g_job.kind = kind;
     g_job.thread = CreateThread(0, 0, job_thread, &g_job, 0, &tid);
     if (!g_job.thread) { g_job.kind = JOB_NONE; return 0; }
@@ -370,7 +421,8 @@ static int job_start(int kind)
 static void crumb_update(void)
 {
     int i, o;
-    o = _snprintf(g_m.src_crumb, sizeof g_m.src_crumb, "%s", g_srv.name);
+    if (g_m.acct_sel < 0 || g_m.acct_sel >= g_nsrc) { strcpy(g_m.src_crumb, "SELECT A SOURCE"); return; }
+    o = _snprintf(g_m.src_crumb, sizeof g_m.src_crumb, "%s", g_src[g_m.acct_sel].name);
     for (i = 1; i <= g_depth && o > 0 && o < (int)sizeof g_m.src_crumb - 8; i++)
         o += _snprintf(g_m.src_crumb + o, sizeof g_m.src_crumb - (size_t)o, " > %s", g_names[i]);
     g_m.src_crumb[sizeof g_m.src_crumb - 1] = 0;
@@ -379,90 +431,112 @@ static void crumb_update(void)
 
 static void browse(const char *node)
 {
-    strncpy(g_job.node, node, sizeof g_job.node - 1);
+    if (g_m.acct_sel < 0 || g_m.acct_sel >= g_nsrc) return;
+    strncpy(g_job.node, node, sizeof g_job.node - 1); g_job.node[sizeof g_job.node - 1] = 0;
+    g_job.src = g_src[g_m.acct_sel];
     if (!job_start(JOB_BROWSE)) return;
     g_m.src_busy = 1; strcpy(g_m.src_status, "LOADING...");
     ui_model_changed(g_ui, UI_CH_SOURCES);
 }
 
-static void show_level(plex_item *items, int n)
+static void clear_level(void)
 {
-    static const char *noun[] = { "LIBRARIES", "ARTISTS", "ALBUMS", "TRACKS" };
-    int i;
-    free(g_lib); free(g_m.src_items);
+    free(g_lib); g_lib = 0; g_nlib = 0;
+    free(g_m.src_items); g_m.src_items = 0; g_m.src_nitems = 0; g_m.src_sel = -1;
+}
+
+static void show_level(ea_sitem *items, int n)
+{
+    int i, tracks = 0;
+    clear_level();
     g_lib = items; g_nlib = n;
     g_m.src_items = (ea_srcitem *)calloc((size_t)(n > 0 ? n : 1), sizeof(ea_srcitem));
     for (i = 0; i < n && g_m.src_items; i++) {
         strncpy(g_m.src_items[i].name, items[i].name, sizeof g_m.src_items[i].name - 1);
-        g_m.src_items[i].container = items[i].kind != PLEX_TRACK;
+        g_m.src_items[i].container = !items[i].is_track;
+        tracks += items[i].is_track;
     }
     g_m.src_nitems = g_m.src_items ? n : 0;
     g_m.src_sel = n > 0 ? 0 : -1;
-    if (n > 0) sprintf(g_m.src_status, "%d %s", n, noun[items[0].kind]); else strcpy(g_m.src_status, "NOTHING HERE");
+    if (!n) strcpy(g_m.src_status, "NOTHING HERE");
+    else if (tracks == n) sprintf(g_m.src_status, "%d TRACK%s", n, n == 1 ? "" : "S");
+    else sprintf(g_m.src_status, "%d ITEM%s", n, n == 1 ? "" : "S");
     crumb_update();
     ui_list_reset(g_ui);
 }
 
+static void add_track(const ea_sitem *t) { pl_add_named(t->url, t->name, t->dur_s); }
+
 static void on_src_open(void *ctx, int idx)
 {
-    static const char *prefix[] = { "section", "artist", "album" };
     (void)ctx;
-    if (!g_linked || g_job.kind != JOB_NONE) return;
-    if (idx < 0) { g_depth = 0; g_nodes[0][0] = 0; browse(""); return; }
+    if (!g_nsrc || g_job.kind != JOB_NONE) return;
+    if (idx < 0) { g_depth = 0; g_nodes[0][0] = 0; clear_level(); browse(""); return; }     /* an account row: its root */
     if (idx >= g_nlib) return;
-    if (g_lib[idx].kind == PLEX_TRACK) {
-        char url[640];
-        plex_item_url(&g_lib[idx], url, (int)sizeof url);
-        pl_add_named(url, g_lib[idx].name, g_lib[idx].dur_s);
+    if (g_lib[idx].is_track) {
+        add_track(&g_lib[idx]);
         ui_model_changed(g_ui, UI_CH_PLAYLIST);
         play_index(0, g_m.ntracks - 1);
         return;
     }
     if (g_depth + 1 >= MAX_DEPTH) return;
     g_depth++;
-    sprintf(g_nodes[g_depth], "%s/%s", prefix[g_lib[idx].kind], g_lib[idx].key);
+    strcpy(g_nodes[g_depth], g_lib[idx].node);
     strncpy(g_names[g_depth], g_lib[idx].name, sizeof g_names[0] - 1);
     browse(g_nodes[g_depth]);
 }
 
-/* PLAY / ADD: the selected row - a track, or every track under an album or artist */
+/* PLAY / ADD: the selected row - a track, or every track underneath a folder */
 static void collect(int then_play)
 {
-    plex_item *it;
-    if (!g_linked || g_job.kind != JOB_NONE || g_m.src_sel < 0 || g_m.src_sel >= g_nlib) return;
+    ea_sitem *it;
+    if (!g_nsrc || g_job.kind != JOB_NONE || g_m.src_sel < 0 || g_m.src_sel >= g_nlib) return;
     it = &g_lib[g_m.src_sel];
-    if (it->kind == PLEX_SECTION) { strcpy(g_m.src_status, "OPEN THE LIBRARY AND PICK AN ARTIST"); ui_model_changed(g_ui, UI_CH_SOURCES); return; }
-    if (it->kind == PLEX_TRACK) {
-        char url[640];
+    if (it->is_track) {
         int first = g_m.ntracks;
-        plex_item_url(it, url, (int)sizeof url);
-        pl_add_named(url, it->name, it->dur_s);
+        add_track(it);
         ui_model_changed(g_ui, UI_CH_PLAYLIST);
         if (then_play) play_index(0, first);
-        sprintf(g_m.src_status, "ADDED 1 TRACK"); ui_model_changed(g_ui, UI_CH_SOURCES);
+        strcpy(g_m.src_status, "ADDED 1 TRACK"); ui_model_changed(g_ui, UI_CH_SOURCES);
         return;
     }
-    sprintf(g_job.node, "%s/%s", it->kind == PLEX_ALBUM ? "album" : "artist", it->key);
-    g_job.row_kind = it->kind; g_job.then_play = then_play;
+    if (g_depth == 0) { strcpy(g_m.src_status, "OPEN THE LIBRARY AND PICK AN ARTIST OR ALBUM"); ui_model_changed(g_ui, UI_CH_SOURCES); return; }
+    strcpy(g_job.node, it->node);
+    g_job.src = g_src[g_m.acct_sel]; g_job.then_play = then_play;
     if (!job_start(JOB_COLLECT)) return;
     g_m.src_busy = 1; strcpy(g_m.src_status, "COLLECTING TRACKS...");
     ui_model_changed(g_ui, UI_CH_SOURCES);
 }
 
-static void plex_unlink(void)
+static void source_add(const ea_source *n)
 {
-    if (g_job.kind != JOB_NONE) return;
-    g_linked = 0; g_token[0] = 0; memset(&g_srv, 0, sizeof g_srv);
-    plex_save();
-    free(g_lib); g_lib = 0; g_nlib = 0; free(g_m.src_items); g_m.src_items = 0; g_m.src_nitems = 0; g_m.src_sel = -1;
-    g_m.src_state = EA_SRC_NONE; g_m.src_name[0] = 0; g_depth = 0;
-    strcpy(g_m.src_crumb, "SELECT A SOURCE"); strcpy(g_m.src_status, "UNLINKED");
+    int i;
+    for (i = 0; i < g_nsrc; i++) if (g_src[i].type == n->type && !strcmp(g_src[i].base, n->base)) break;   /* same server: replace */
+    if (i == g_nsrc) { if (g_nsrc == EA_MAX_SOURCES) i = EA_MAX_SOURCES - 1; else g_nsrc++; }
+    g_src[i] = *n;
+    sources_save();
+    accounts_to_model();
+    g_m.acct_sel = i; g_m.accts[i].state = EA_SRC_OK;
+}
+
+static void source_remove_selected(void)
+{
+    int i = g_m.acct_sel;
+    if (g_job.kind != JOB_NONE || i < 0 || i >= g_nsrc) return;
+    memset(&g_src[i], 0, sizeof g_src[i]);
+    memmove(&g_src[i], &g_src[i + 1], sizeof(ea_source) * (size_t)(g_nsrc - i - 1));
+    memmove(&g_m.accts[i], &g_m.accts[i + 1], sizeof(ea_acct) * (size_t)(g_nsrc - i - 1));
+    g_nsrc--;
+    sources_save();
+    accounts_to_model();
+    clear_level(); g_depth = 0;
+    strcpy(g_m.src_status, "REMOVED");
+    crumb_update();
     ui_model_changed(g_ui, UI_CH_SOURCES);
+    if (g_nsrc) on_src_open(0, -1);
 }
 
 /* called every frame: progress of, and results from, the running job */
-static void on_src_open(void *ctx, int idx);
-
 static void job_poll(void)
 {
     job_t *j = &g_job;
@@ -477,65 +551,79 @@ static void job_poll(void)
     g_m.src_busy = 0;
     switch (j->kind) {
     case JOB_LINK:
-        g_m.link_open = 0; g_m.link_code[0] = 0;
+    case JOB_SIGNIN:
         if (j->ok) {
-            strcpy(g_token, j->token); g_srv = j->srv; g_linked = 1; plex_save();
-            g_m.src_state = EA_SRC_OK; _snprintf(g_m.src_name, sizeof g_m.src_name, "Plex  %s", g_srv.name);
-            j->kind = JOB_NONE; g_depth = 0; browse("");
+            g_m.link_open = 0; g_m.link_code[0] = 0; g_m.form_open = 0;
+            memset(g_m.form_field[2], 0, sizeof g_m.form_field[2]);
+            source_add(&j->result);
+            j->kind = JOB_NONE;
+            on_src_open(0, -1);
             ui_model_changed(g_ui, UI_CH_SOURCES);
             return;
         }
-        _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->cancel ? "CANCELLED" : j->err);
+        if (j->kind == JOB_SIGNIN) {                             /* stay in the form so the user can fix a typo */
+            _snprintf(g_m.form_status, sizeof g_m.form_status, "%s", j->err); g_m.form_status[sizeof g_m.form_status - 1] = 0;
+            CharUpperA(g_m.form_status);
+        } else {
+            g_m.link_open = 0; g_m.link_code[0] = 0;
+            _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->cancel ? "CANCELLED" : j->err);
+        }
         break;
     case JOB_RECONNECT:
-        if (j->ok) {                                     /* show the library straight away, not an empty page */
-            g_srv = j->srv; plex_save(); g_m.src_state = EA_SRC_OK;
-            j->kind = JOB_NONE; g_depth = 0; g_nodes[0][0] = 0; browse("");
+        for (i = 0; i < g_nsrc; i++) g_m.accts[i].state = j->alive[i] ? EA_SRC_OK : EA_SRC_UNREACHABLE;
+        strcpy(g_m.src_status, g_nsrc ? "READY" : "");
+        if (g_auto_jf[0][0]) break;
+        for (i = 0; i < g_nsrc; i++) if (j->alive[i] && (g_want_acct < 0 || g_want_acct == i)) {   /* show a library straight away */
+            g_m.acct_sel = i; j->kind = JOB_NONE;
+            on_src_open(0, -1);
             ui_model_changed(g_ui, UI_CH_SOURCES);
             return;
         }
-        else { g_m.src_state = EA_SRC_UNREACHABLE; _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err[0] ? j->err : "SERVER NOT REACHABLE"); }
         break;
     case JOB_BROWSE:
         if (j->ok) {
             show_level(j->items, j->nitems); j->items = 0;
+            if (g_m.acct_sel >= 0 && g_m.acct_sel < g_nsrc) g_m.accts[g_m.acct_sel].state = EA_SRC_OK;
             if (g_script_pos < g_script_n) {                     /* scripted descent, one row per loaded level */
                 int row = g_script[g_script_pos++];
-                j->kind = JOB_NONE; g_m.src_busy = 0; g_m.src_sel = row;
+                j->kind = JOB_NONE; g_m.src_sel = row;
                 ui_model_changed(g_ui, UI_CH_SOURCES);
                 on_src_open(0, row);
                 return;
             }
+        } else {
+            if (g_depth > 0) g_depth--;
+            else if (g_m.acct_sel >= 0 && g_m.acct_sel < g_nsrc) g_m.accts[g_m.acct_sel].state = EA_SRC_UNREACHABLE;
+            _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err);
         }
-        else { if (g_depth > 0) g_depth--; _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err); }
         break;
     case JOB_COLLECT: {
-        int first = g_m.ntracks, added = 0;
-        for (i = 0; i < j->nitems; i++) if (j->items[i].kind == PLEX_TRACK) {
-            char url[640];
-            plex_item_url(&j->items[i], url, (int)sizeof url);
-            pl_add_named(url, j->items[i].name, j->items[i].dur_s);
-            added++;
-        }
+        int first = g_m.ntracks;
+        for (i = 0; i < j->nitems; i++) add_track(&j->items[i]);
+        if (j->nitems) {
+            sprintf(g_m.src_status, "ADDED %d TRACK%s%s", j->nitems, j->nitems == 1 ? "" : "S", j->nitems >= COLLECT_CAP ? " (LIMIT)" : "");
+            ui_model_changed(g_ui, UI_CH_PLAYLIST);
+            if (j->then_play) play_index(0, first);
+        } else _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err[0] ? j->err : "NO TRACKS HERE");
         free(j->items); j->items = 0;
-        if (added) { sprintf(g_m.src_status, "ADDED %d TRACK%s", added, added == 1 ? "" : "S"); ui_model_changed(g_ui, UI_CH_PLAYLIST); if (j->then_play) play_index(0, first); }
-        else _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err[0] ? j->err : "NO TRACKS HERE");
         break; }
     }
     g_m.src_status[sizeof g_m.src_status - 1] = 0;
     CharUpperA(g_m.src_status);
     j->kind = JOB_NONE;
     ui_model_changed(g_ui, UI_CH_SOURCES);
+    if (g_auto_jf[0][0] && !g_m.form_open) {                     /* /jf: test switch: sign in once the startup check is done */
+        memcpy(g_job.field, g_auto_jf, sizeof g_job.field); g_auto_jf[0][0] = 0;
+        g_m.form_open = 1; strcpy(g_m.form_status, "SIGNING IN...");
+        job_start(JOB_SIGNIN);
+    }
 }
 
-static void plex_startup(void)
+static void sources_startup(void)
 {
-    plex_load();
-    if (!g_linked) return;
-    g_m.src_state = EA_SRC_OK;
-    _snprintf(g_m.src_name, sizeof g_m.src_name, "Plex  %s", g_srv.name);
-    strcpy(g_m.src_status, "CONNECTING...");
+    sources_load();
     crumb_update();
+    if (g_nsrc) strcpy(g_m.src_status, "CONNECTING...");
     job_start(JOB_RECONNECT);
 }
 
@@ -594,14 +682,32 @@ static void on_command(void *ctx, int cmd)
         if (g_m.ntracks && ask_file(1, "Playlist (*.m3u)\0*.m3u\0", "m3u", path, MAX_PATH, 0)) m3u_save(path);
         break;
     case EA_CMD_SRC_LINK:
-        if (g_linked) { strcpy(g_m.src_status, "ALREADY LINKED - REM TO UNLINK FIRST"); ui_model_changed(g_ui, UI_CH_SOURCES); break; }
+        if (g_nsrc >= EA_MAX_SOURCES) { strcpy(g_m.src_status, "REMOVE AN ACCOUNT FIRST"); ui_model_changed(g_ui, UI_CH_SOURCES); break; }
         if (job_start(JOB_LINK)) { g_m.link_open = 1; g_m.link_code[0] = 0; strcpy(g_m.link_status, "CONTACTING PLEX.TV..."); ui_model_changed(g_ui, UI_CH_SOURCES); }
         break;
     case EA_CMD_SRC_LINK_CANCEL: InterlockedExchange(&g_job.cancel, 1); g_m.link_open = 0; ui_model_changed(g_ui, UI_CH_SOURCES); break;
-    case EA_CMD_SRC_JELLYFIN: strcpy(g_m.src_status, "JELLYFIN IS NOT IN THIS BUILD YET"); ui_model_changed(g_ui, UI_CH_SOURCES); break;
-    case EA_CMD_SRC_REMOVE:   plex_unlink(); break;
+    case EA_CMD_SRC_JELLYFIN:
+        if (g_job.kind != JOB_NONE) break;
+        g_m.form_open = 1; g_m.form_focus = g_m.form_field[0][0] ? (g_m.form_field[1][0] ? 2 : 1) : 0;
+        strcpy(g_m.form_status, "");
+        ui_model_changed(g_ui, UI_CH_SOURCES);
+        break;
+    case EA_CMD_SRC_FORM_SUBMIT:
+        if (g_job.kind != JOB_NONE) break;
+        if (!g_m.form_field[0][0] || !g_m.form_field[1][0]) { strcpy(g_m.form_status, "SERVER AND USERNAME ARE REQUIRED"); ui_model_changed(g_ui, UI_CH_SOURCES); break; }
+        memcpy(g_job.field, g_m.form_field, sizeof g_job.field);
+        strcpy(g_m.form_status, "SIGNING IN...");
+        job_start(JOB_SIGNIN);
+        ui_model_changed(g_ui, UI_CH_SOURCES);
+        break;
+    case EA_CMD_SRC_FORM_CANCEL:
+        if (g_job.kind == JOB_SIGNIN) break;                      /* let the request finish; it is seconds at most */
+        g_m.form_open = 0; memset(g_m.form_field[2], 0, sizeof g_m.form_field[2]);
+        ui_model_changed(g_ui, UI_CH_SOURCES);
+        break;
+    case EA_CMD_SRC_REMOVE:   source_remove_selected(); break;
     case EA_CMD_SRC_BACK:
-        if (g_linked && g_depth > 0 && g_job.kind == JOB_NONE) { g_depth--; browse(g_nodes[g_depth]); }
+        if (g_nsrc && g_depth > 0 && g_job.kind == JOB_NONE) { g_depth--; browse(g_nodes[g_depth]); }
         break;
     case EA_CMD_SRC_PLAY: collect(1); break;
     case EA_CMD_SRC_ADD:  collect(0); break;
@@ -763,7 +869,7 @@ static int map_key(WPARAM vk)
     case VK_PRIOR: return UI_KEY_PGUP;  case VK_NEXT: return UI_KEY_PGDN;
     case VK_HOME: return UI_KEY_HOME;   case VK_END: return UI_KEY_END;
     case VK_RETURN: return UI_KEY_ENTER; case VK_DELETE: return UI_KEY_DELETE;
-    case VK_ESCAPE: return UI_KEY_ESC;  case VK_SPACE: return UI_KEY_SPACE;
+    case VK_ESCAPE: return UI_KEY_ESC;  case VK_SPACE: return g_m.form_open ? 0 : UI_KEY_SPACE;
     }
     return 0;
 }
@@ -811,6 +917,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ui_wheel(g_ui, p.x, p.y, (short)HIWORD(wp) / 120);
         return 0; }
     case WM_KEYDOWN: { int k = map_key(wp); if (k) ui_key(g_ui, k); return 0; }
+    case WM_CHAR: ui_char(g_ui, (int)wp); return 0;
     case WM_DROPFILES: {
         HDROP d = (HDROP)wp;
         UINT n = DragQueryFileA(d, 0xFFFFFFFF, 0, 0), i;
@@ -849,12 +956,15 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         else if (!strncmp(a, "/depth:", 7)) g_force_depth = atoi(a + 7);      /* 32, 16, 15, 8, 4: try a colour path on any desktop */
         else if (!strncmp(a, "/preset:", 8)) { int p = atoi(a + 8); if (p >= 0 && p < ea_preset_count()) ea_preset_apply(&g_m, p); }
         else if (!strncmp(a, "/vu", 3)) g_m.viz_vu = 1;
+        else if (!strncmp(a, "/jf:", 4)) { char t[400], *c1, *c2; strncpy(t, a + 4, sizeof t - 1); t[sizeof t - 1] = 0;
+            if ((c1 = strchr(t, ',')) != 0 && (c2 = strchr(c1 + 1, ',')) != 0) { *c1 = 0; *c2 = 0; strcpy(g_auto_jf[0], t); strcpy(g_auto_jf[1], c1 + 1); strcpy(g_auto_jf[2], c2 + 1); } }
+        else if (!strncmp(a, "/acct:", 6)) g_want_acct = atoi(a + 6);
         else if (!strncmp(a, "/open:", 6)) { const char *q = a + 6; while (*q && g_script_n < 8) { g_script[g_script_n++] = atoi(q); q = strchr(q, ','); if (!q) break; q++; } }
         else { const char *dot = strrchr(a, '.'); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
     }
     eng_set_dsp(g_eng, &g_m);
     net_init();
-    plex_startup();
+    sources_startup();
     if (!presenter_init()) { MessageBoxA(0, "Could not create the display surface.", "EasyAmp", MB_ICONERROR); return 1; }
 
     memset(&wc, 0, sizeof wc);

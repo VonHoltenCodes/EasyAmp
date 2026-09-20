@@ -67,6 +67,7 @@ static const ea_rect R_CRUMB    = { 244,  56, 483,  20 };
 static const ea_rect R_LIBLIST  = { 244,  76, 483, 435 };
 static const ea_rect R_LIBBTNS  = { 244, 513, 483,  38 };
 static const ea_rect R_LINKDLG  = { 215, 190, 300, 190 };
+static const ea_rect R_FORMDLG  = { 195, 150, 340, 270 };
 
 #define PL_ROW_H   18
 #define SMALL_CURVE_H 30
@@ -122,6 +123,7 @@ struct ea_ui {
     struct { int open, owner, n, hover; ea_rect r; const char *items[MAX_MENU]; } menu;
     int show_eq, show_pl;
     int dlg_was_open, dlg_hover, dlg_down;
+    int caret_on, caret_acc;
 };
 
 /* ======================================================================== */
@@ -853,8 +855,9 @@ static void draw_liblist(ea_ui *ui, widget *w)
     if (m->src_nitems > 0 && m->src_items) { lv_draw(ui, &w->r, &ui->lib, m->src_nitems, m->src_sel, -1, lib_text); return; }
     {
         ea_rect msg = w->r;
-        const char *t = m->src_busy ? "LOADING..." : m->src_state == EA_SRC_NONE ? "LINK A PLEX ACCOUNT TO BROWSE YOUR MUSIC" :
-                        m->src_state == EA_SRC_UNREACHABLE ? "SERVER NOT REACHABLE" : "NOTHING HERE";
+        int st = m->naccts > 0 && m->acct_sel >= 0 && m->acct_sel < m->naccts ? m->accts[m->acct_sel].state : EA_SRC_NONE;
+        const char *t = m->src_busy ? "LOADING..." : m->naccts == 0 ? "ADD A PLEX OR JELLYFIN ACCOUNT TO BROWSE YOUR MUSIC" :
+                        st == EA_SRC_UNREACHABLE ? "SERVER NOT REACHABLE" : "NOTHING HERE";
         msg.h = 60; msg.y = w->r.y + w->r.h / 2 - 30;
         text_center(&ui->fb, &EA_FONT_IND, &msg, t, C_IND_OFF, 1, 0);
     }
@@ -864,23 +867,26 @@ static void draw_srcacct(ea_ui *ui, widget *w)
 {
     ea_surface *s = &ui->fb;
     ea_model *m = ui->m;
-    int y = w->r.y + 2;
-    ea_px ledc;
-    if (m->src_state == EA_SRC_NONE) {
+    int i;
+    if (m->naccts == 0) {
         ea_rect msg = w->r;
         msg.h = 40; msg.y = w->r.y + 20;
         text_center(s, &EA_FONT_IND, &msg, "NO SOURCES YET", C_IND_OFF, 1, 0);
         msg.y += 16;
-        text_center(s, &EA_FONT_IND, &msg, "PRESS +PLEX TO LINK", C_IND_OFF, 1, 0);
+        text_center(s, &EA_FONT_IND, &msg, "+PLEX OR +JELLYFIN TO ADD ONE", C_IND_OFF, 1, 0);
         return;
     }
-    gfx_fill(s, w->r.x + 1, y, w->r.w - 2, PL_ROW_H, C_SELECT);
-    ledc = m->src_state == EA_SRC_OK ? C_LCD_ON : EA_RGB(0xff, 0x3b, 0x2b);
-    gfx_glow_rect(s, w->r.x + 7, y + 5, 8, 8, 5, ledc, 200);
-    gfx_fill(s, w->r.x + 6, y + 4, 10, 10, ledc);
-    gfx_frame(s, w->r.x + 6, y + 4, 10, 10, EA_RGB(0x0a, 0x0a, 0x04), EA_RGB(0x3c, 0x3c, 0x1c));
     gfx_clip(s, w->r.x + 1, w->r.y + 1, w->r.w - 2, w->r.h - 2);
-    gfx_text(s, &EA_FONT_TRACK, w->r.x + 22, y + 13, m->src_name, C_WHITE, 0, GFX_GLOW, EA_RGB(150, 180, 255));
+    for (i = 0; i < m->naccts; i++) {
+        int y = w->r.y + 2 + i * PL_ROW_H, sel = i == m->acct_sel;
+        ea_px ledc = m->accts[i].state == EA_SRC_OK ? C_LCD_ON : m->accts[i].state == EA_SRC_UNREACHABLE ? EA_RGB(0xff, 0x3b, 0x2b) : EA_RGB(0x2a, 0x2a, 0x0b);
+        if (sel) gfx_fill(s, w->r.x + 1, y, w->r.w - 2, PL_ROW_H, C_SELECT);
+        if (m->accts[i].state != EA_SRC_NONE) gfx_glow_rect(s, w->r.x + 7, y + 5, 8, 8, 5, ledc, 200);
+        gfx_fill(s, w->r.x + 6, y + 4, 10, 10, ledc);
+        gfx_frame(s, w->r.x + 6, y + 4, 10, 10, EA_RGB(0x0a, 0x0a, 0x04), EA_RGB(0x3c, 0x3c, 0x1c));
+        gfx_text(s, &EA_FONT_TRACK, w->r.x + 22, y + 13, m->accts[i].name, sel ? C_WHITE : C_LCD, 0, GFX_GLOW,
+                 sel ? EA_RGB(150, 180, 255) : C_LCD);
+    }
     gfx_unclip(s);
 }
 
@@ -1138,6 +1144,58 @@ static void draw_menu(ea_ui *ui)
     }
 }
 
+/* ---- Jellyfin sign-in form: three typed fields ------------------------------------- */
+
+static const char *FORM_LABEL[3] = { "SERVER  (like 192.168.1.5:8096)", "USERNAME", "PASSWORD" };
+
+static void form_field_rect(int i, ea_rect *r) { r->x = R_FORMDLG.x + 20; r->y = R_FORMDLG.y + 52 + i * 46; r->w = R_FORMDLG.w - 40; r->h = 22; }
+static void form_button_rect(int i, ea_rect *r) { r->x = R_FORMDLG.x + 20 + i * 155; r->y = R_FORMDLG.y + 226; r->w = 145; r->h = 28; }
+
+static void dlg_button(ea_surface *s, const ea_rect *b, const char *label, int hover, int down)
+{
+    int cw = gfx_text_w(&EA_FONT_BTN, label, 1) - 1, base = text_base(&EA_FONT_BTN, b->y, b->h) + (down ? 1 : 0);
+    button_face(s, b, hover, down);
+    button_text(s, &EA_FONT_BTN, b->x + (b->w - cw) / 2 + (down ? 1 : 0), base, label, C_BTN_INK, 1);
+}
+
+static void draw_formdlg(ea_ui *ui)
+{
+    ea_surface *s = &ui->fb;
+    const ea_rect *r = &R_FORMDLG;
+    ea_model *m = ui->m;
+    ea_rect line = *r, f, b;
+    int i;
+    gfx_fill_a(s, 0, 0, EA_WIN_W, EA_WIN_H, C_BLACK, 120);
+    gfx_fill_a(s, r->x + 4, r->y + 4, r->w, r->h, C_BLACK, 130);
+    gfx_fill(s, r->x, r->y, r->w, r->h, EA_RGB(0x23, 0x2b, 0x4a));
+    gfx_scanlines(s, r->x, r->y, r->w, r->h, 8, 6, 26);
+    gfx_frame(s, r->x, r->y, r->w, r->h, C_BAR_HI, C_BAR_LO);
+    line.h = 18; line.y = r->y + 12;
+    text_center(s, &EA_FONT_LCD, &line, "Sign in to Jellyfin", C_WHITE, 1, 0);
+    for (i = 0; i < 3; i++) {
+        char shown[130];
+        int n = (int)strlen(m->form_field[i]), k, tw, focus = i == m->form_focus;
+        form_field_rect(i, &f);
+        gfx_text(s, &EA_FONT_IND, f.x, f.y - 5, FORM_LABEL[i], C_CTLLABEL, 1, 0, 0);
+        gfx_fill(s, f.x, f.y, f.w, f.h, EA_RGB(0x10, 0x13, 0x1f));
+        gfx_frame(s, f.x, f.y, f.w, f.h, focus ? C_LCD_ON : EA_RGB(0x45, 0x4f, 0x7a), focus ? C_LCD_ON : EA_RGB(0x45, 0x4f, 0x7a));
+        for (k = 0; k < n; k++) shown[k] = i == 2 ? '*' : m->form_field[i][k];
+        shown[n] = 0;
+        gfx_clip(s, f.x + 3, f.y + 1, f.w - 6, f.h - 2);
+        tw = gfx_text_w(&EA_FONT_TRACK, shown, 0);
+        k = tw > f.w - 14 ? f.w - 14 - tw : 0;                          /* long text scrolls left, the end stays visible */
+        gfx_text(s, &EA_FONT_TRACK, f.x + 5 + k, f.y + 16, shown, EA_RGB(0xcf, 0xe3, 0xff), 0, 0, 0);
+        if (focus && ui->caret_on) gfx_fill(s, f.x + 6 + k + tw, f.y + 4, 1, f.h - 8, C_LCD_ON);
+        gfx_unclip(s);
+    }
+    line.y = r->y + 196; line.h = 16;
+    gfx_clip(s, r->x + 6, line.y, r->w - 12, 16);
+    text_center(s, &EA_FONT_IND, &line, m->form_status, C_LCD_ON, 1, 0);
+    gfx_unclip(s);
+    form_button_rect(0, &b); dlg_button(s, &b, "SIGN IN + ADD", ui->dlg_hover == 1, ui->dlg_down == 1);
+    form_button_rect(1, &b); dlg_button(s, &b, "CANCEL", ui->dlg_hover == 2, ui->dlg_down == 2);
+}
+
 /* ======================================================================== */
 /*  widget table                                                              */
 /* ======================================================================== */
@@ -1332,11 +1390,12 @@ void ui_model_changed(ea_ui *ui, int what)
     }
     if (what & UI_CH_FOOTER)    mark_kind(ui, K_FOOTSTAT);
     if (what & UI_CH_SOURCES)   { mark_kind(ui, K_SRCACCT); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_CRUMB);
-                                  mark_kind(ui, K_SRCSTATUS); if (ui->m->link_open || ui->dlg_was_open) ui->full_dirty = 1; }
+                                  mark_kind(ui, K_SRCSTATUS); if (ui->m->link_open || ui->m->form_open || ui->dlg_was_open) ui->full_dirty = 1; }
 }
 
 void ui_tick(ea_ui *ui, int elapsed_ms)
 {
+    if (ui->m->form_open) { ui->caret_acc += elapsed_ms; if (ui->caret_acc >= 450) { ui->caret_acc = 0; ui->caret_on = !ui->caret_on; ui->full_dirty = 1; } }
     ui->mq_acc += elapsed_ms;
     if (ui->mq_acc >= 220) {
         ui->mq_acc = 0;
@@ -1351,7 +1410,7 @@ static int intersects(const ea_rect *a, const ea_rect *b)
 
 int ui_render(ea_ui *ui, ea_rect *dirty, int max)
 {
-    int i, n = 0, menu_hit = 0, dlg = ui->m->link_open && ui->m->page == EA_PAGE_SOURCES;
+    int i, n = 0, menu_hit = 0, dlg = (ui->m->link_open || ui->m->form_open) && ui->m->page == EA_PAGE_SOURCES;
     if (ui->bg_page != ui->m->page) { build_bg(ui); ui->full_dirty = 1; }
     /* a modal dialog dims the whole page, so while it is up every change is a full repaint */
     if (dlg || ui->dlg_was_open != dlg) { for (i = 0; i < ui->nw; i++) if (ui->w[i].dirty) ui->full_dirty = 1; }
@@ -1389,7 +1448,7 @@ int ui_render(ea_ui *ui, ea_rect *dirty, int max)
         draw_menu(ui);
         if (!ui->full_dirty && n < max) { dirty[n] = ui->menu.r; dirty[n].w += 3; dirty[n].h += 3; n++; }
     }
-    if (ui->full_dirty && dlg) draw_linkdlg(ui, ui->dlg_hover, ui->dlg_down);
+    if (ui->full_dirty && dlg) { if (ui->m->form_open) draw_formdlg(ui); else draw_linkdlg(ui, ui->dlg_hover, ui->dlg_down); }
     if (ui->full_dirty) {
         ui->full_dirty = 0;
         if (max > 0) { dirty[0].x = dirty[0].y = 0; dirty[0].w = EA_WIN_W; dirty[0].h = EA_WIN_H; }
@@ -1520,12 +1579,28 @@ static void set_hover(ea_ui *ui, int idx)
     if (idx >= 0) { ui->w[idx].hover = 1; ui->w[idx].dirty = 1; }
 }
 
-static int dlg_active(ea_ui *ui) { return ui->m->link_open && ui->m->page == EA_PAGE_SOURCES; }
+static int dlg_active(ea_ui *ui) { return (ui->m->link_open || ui->m->form_open) && ui->m->page == EA_PAGE_SOURCES; }
+
+/* which dialog button is under the pointer: 0 none, 1 primary, 2 cancel */
+static int dlg_button_at(ea_ui *ui, int x, int y)
+{
+    ea_rect b;
+    if (!ui->m->form_open) return inside(&R_LINKCANCEL, x, y) ? 1 : 0;
+    form_button_rect(0, &b); if (inside(&b, x, y)) return 1;
+    form_button_rect(1, &b); if (inside(&b, x, y)) return 2;
+    return 0;
+}
+
+static void dlg_fire(ea_ui *ui, int button)
+{
+    if (!ui->m->form_open) command(ui, EA_CMD_SRC_LINK_CANCEL);
+    else command(ui, button == 1 ? EA_CMD_SRC_FORM_SUBMIT : EA_CMD_SRC_FORM_CANCEL);
+}
 
 void ui_mouse_move(ea_ui *ui, int x, int y)
 {
     if (dlg_active(ui)) {
-        int h = inside(&R_LINKCANCEL, x, y);
+        int h = dlg_button_at(ui, x, y);
         if (h != ui->dlg_hover) { ui->dlg_hover = h; ui->full_dirty = 1; }
         return;
     }
@@ -1555,7 +1630,13 @@ void ui_mouse_down(ea_ui *ui, int x, int y)
 {
     int i;
     widget *w;
-    if (dlg_active(ui)) { if (inside(&R_LINKCANCEL, x, y)) { ui->dlg_down = 1; ui->full_dirty = 1; } return; }
+    if (dlg_active(ui)) {
+        int b = dlg_button_at(ui, x, y), k;
+        if (b) { ui->dlg_down = b; ui->full_dirty = 1; }
+        else if (ui->m->form_open)
+            for (k = 0; k < 3; k++) { ea_rect f; form_field_rect(k, &f); if (inside(&f, x, y)) { ui->m->form_focus = k; ui->caret_on = 1; ui->full_dirty = 1; } }
+        return;
+    }
     if (ui->menu.open) {
         int h = inside(&ui->menu.r, x, y) ? (y - ui->menu.r.y - 3) / MENU_ROW_H : -1;
         menu_pick(ui, h >= 0 && h < ui->menu.n ? h : -1);
@@ -1573,7 +1654,10 @@ void ui_mouse_down(ea_ui *ui, int x, int y)
                     ui->press_v = ui->press_v < 0 ? 0 : (ui->press_v > 1 ? 1 : ui->press_v); break;
     case K_PLAYLIST: { int idx = lv_press(&w->r, &ui->pl, ui->m->ntracks, x, y); if (idx != -2) ui->m->sel = idx; break; }
     case K_LIBLIST:  { int idx = lv_press(&w->r, &ui->lib, ui->m->src_nitems, x, y); if (idx != -2) ui->m->src_sel = idx; break; }
-    case K_SRCACCT:  if (ui->m->src_state != EA_SRC_NONE && y < w->r.y + 2 + PL_ROW_H && ui->act.src_open) ui->act.src_open(ui->act.ctx, -1); break;
+    case K_SRCACCT: {
+        int row = (y - w->r.y - 2) / PL_ROW_H;
+        if (row >= 0 && row < ui->m->naccts) { ui->m->acct_sel = row; w->dirty = 1; if (ui->act.src_open) ui->act.src_open(ui->act.ctx, -1); }
+        break; }
     }
 }
 
@@ -1582,9 +1666,9 @@ void ui_mouse_up(ea_ui *ui, int x, int y)
     widget *w;
     int in;
     if (dlg_active(ui)) {
-        int fire = ui->dlg_down && inside(&R_LINKCANCEL, x, y);
+        int b = ui->dlg_down, fire = b && dlg_button_at(ui, x, y) == b;
         ui->dlg_down = 0; ui->full_dirty = 1;
-        if (fire) command(ui, EA_CMD_SRC_LINK_CANCEL);
+        if (fire) dlg_fire(ui, b);
         return;
     }
     if (ui->capture < 0) return;
@@ -1665,7 +1749,12 @@ static int nav(int key, int *sel, int n, int rows)
 void ui_key(ea_ui *ui, int key)
 {
     ea_model *m = ui->m;
-    if (m->link_open && m->page == EA_PAGE_SOURCES) { if (key == UI_KEY_ESC) command(ui, EA_CMD_SRC_LINK_CANCEL); return; }
+    if (dlg_active(ui)) {
+        if (key == UI_KEY_ESC) dlg_fire(ui, 2);
+        else if (m->form_open && key == UI_KEY_ENTER) dlg_fire(ui, 1);
+        else if (m->form_open && (key == UI_KEY_DOWN || key == UI_KEY_UP)) { m->form_focus = (m->form_focus + (key == UI_KEY_DOWN ? 1 : 2)) % 3; ui->full_dirty = 1; }
+        return;
+    }
     if (key == UI_KEY_ESC) { close_menu(ui); return; }
     if (key == UI_KEY_SPACE) { command(ui, EA_CMD_PLAYPAUSE); return; }
     if (m->page == EA_PAGE_PLAYER && m->ntracks > 0) {
@@ -1676,6 +1765,21 @@ void ui_key(ea_ui *ui, int key)
         if (key == UI_KEY_ENTER) { if (m->src_sel >= 0 && ui->act.src_open) ui->act.src_open(ui->act.ctx, m->src_sel); return; }
         if (nav(key, &m->src_sel, m->src_nitems, lv_rows(&R_LIBLIST))) { lv_reveal(&R_LIBLIST, &ui->lib, m->src_nitems, m->src_sel); mark_kind(ui, K_LIBLIST); }
     }
+}
+
+void ui_char(ea_ui *ui, int ch)
+{
+    ea_model *m = ui->m;
+    char *f;
+    size_t n;
+    if (!m->form_open || m->page != EA_PAGE_SOURCES) return;
+    f = m->form_field[m->form_focus];
+    n = strlen(f);
+    if (ch == 9) m->form_focus = (m->form_focus + 1) % 3;                  /* Tab */
+    else if (ch == 8) { if (n) f[n - 1] = 0; }                             /* Backspace */
+    else if (ch >= 32 && ch < 127 && n < sizeof m->form_field[0] - 1) { f[n] = (char)ch; f[n + 1] = 0; }
+    else return;
+    ui->caret_on = 1; ui->caret_acc = 0; ui->full_dirty = 1;
 }
 
 int ui_is_caption(ea_ui *ui, int x, int y)

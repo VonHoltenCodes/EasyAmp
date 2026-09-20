@@ -56,6 +56,7 @@ int json_get(const ea_json *j, int obj, const char *key)
 }
 
 long json_int(const ea_json *j, int t) { return t >= 0 && t < j->n ? atol(j->js + T(j)[t].start) : 0; }
+double json_num(const ea_json *j, int t) { return t >= 0 && t < j->n ? atof(j->js + T(j)[t].start) : 0; }
 int json_true(const ea_json *j, int t) { return t >= 0 && t < j->n && j->js[T(j)[t].start] == 't'; }
 
 /* ---- folding -------------------------------------------------------------------- */
@@ -110,6 +111,7 @@ void ea_fold_utf8(const char *in, int len, char *out, int cap)
         else if (cp < 127) out[o++] = (char)cp;
         else o = put(out, o, cap, fold_cp(cp));
     }
+    while (o > 0 && out[o - 1] == ' ') o--;               /* ID3v1-era tags arrive space-padded */
     out[o] = 0;
 }
 

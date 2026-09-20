@@ -33,7 +33,7 @@ clean:
 
 .PHONY: shots clean palette
 
-WINSRC := $(CORE) src/dsp.c src/engine_win32.c src/main_win32.c src/net_win32.c src/plex.c src/json.c
+WINSRC := $(CORE) src/dsp.c src/engine_win32.c src/main_win32.c src/net_win32.c src/plex.c src/json.c src/source.c
 
 build/easyamp_res.o: src/easyamp.rc src/easyamp.ico
 	@mkdir -p build
@@ -80,3 +80,7 @@ anchors: $(BR)/inc/bearssl.h
 build/PLEXTEST.EXE: tests/plextest.c src/plex.c src/json.c src/net_win32.c src/*.h build/libbearssl-win.a
 	$(WINCC) $(WINFLAGS) -D_WIN32_WINNT=0x0400 -DWINVER=0x0400 -I$(BR)/inc -mconsole -static -s -o $@ \
 	    tests/plextest.c src/plex.c src/json.c src/net_win32.c build/libbearssl-win.a -lws2_32
+
+build/SRCTEST.EXE: tests/srctest.c src/source.c src/plex.c src/json.c src/net_win32.c src/*.h build/libbearssl-win.a
+	$(WINCC) $(WINFLAGS) -D_WIN32_WINNT=0x0400 -DWINVER=0x0400 -I$(BR)/inc -mconsole -static -s -o $@ \
+	    tests/srctest.c src/source.c src/plex.c src/json.c src/net_win32.c build/libbearssl-win.a -lws2_32

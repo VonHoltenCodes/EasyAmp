@@ -25,13 +25,15 @@ enum {  /* ea_actions.command ids */
     EA_CMD_EQ_IMPORT, EA_CMD_EQ_EXPORT_APO, EA_CMD_EQ_EXPORT_GEQ,
     EA_CMD_WIN_MINIMIZE, EA_CMD_WIN_CLOSE, EA_CMD_OPEN_UPDATE,
     EA_CMD_SRC_LINK, EA_CMD_SRC_LINK_CANCEL, EA_CMD_SRC_JELLYFIN, EA_CMD_SRC_REMOVE,
-    EA_CMD_SRC_BACK, EA_CMD_SRC_PLAY, EA_CMD_SRC_ADD
+    EA_CMD_SRC_BACK, EA_CMD_SRC_PLAY, EA_CMD_SRC_ADD, EA_CMD_SRC_FORM_SUBMIT, EA_CMD_SRC_FORM_CANCEL
 };
 
 typedef struct { char title[160]; int dur_s; } ea_track;
 typedef struct { char name[128]; int container; } ea_srcitem;      /* a row in the library browser */
 
 enum { EA_SRC_NONE, EA_SRC_OK, EA_SRC_UNREACHABLE };
+#define EA_MAX_SOURCES 4
+typedef struct { char name[80]; int state; } ea_acct;                /* a row in the account list */
 
 typedef struct ea_model {
     int   page;
@@ -52,12 +54,15 @@ typedef struct ea_model {
     int   viz_vu;
     float levels[EA_VIZ_BANDS], wave[EA_WAVE], vu_l, vu_r;
     /* sources page: one linked Plex account and the level being browsed */
-    int   src_state;                 /* EA_SRC_* */
-    char  src_name[64], src_crumb[160], src_status[96];
+    ea_acct accts[EA_MAX_SOURCES];
+    int   naccts, acct_sel;
+    char  src_crumb[160], src_status[96];
     ea_srcitem *src_items;
     int   src_nitems, src_sel, src_busy;
     int   link_open;                 /* the "enter this code" dialog */
     char  link_code[8], link_status[96];
+    int   form_open, form_focus;     /* the Jellyfin sign-in form: server, user, password */
+    char  form_field[3][128], form_status[96];
     /* footer */
     int   update_avail;
     char  latest[16];

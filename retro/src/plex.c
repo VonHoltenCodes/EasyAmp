@@ -183,9 +183,20 @@ plex_item *plex_browse(const plex_server *s, const char *client_id, const char *
     return items;
 }
 
-void plex_track_url(const plex_server *s, const plex_item *t, char *out, int cap)
+static int is_mp3(const char *codec)
 {
-    snprintf(out, (size_t)cap, "%s%s", s->base, t->part);
+    return !codec[0] || ((codec[0] | 32) == 'm' && (codec[1] | 32) == 'p' && codec[2] == '3' && !codec[3]);
+}
+
+void plex_track_url(const plex_server *s, const char *client_id, const plex_item *t, char *out, int cap)
+{
+    if (is_mp3(t->codec)) snprintf(out, (size_t)cap, "%s%s", s->base, t->part);
+    else snprintf(out, (size_t)cap,
+                  "%s/music/:/transcode/universal/start.mp3?path=%%2Flibrary%%2Fmetadata%%2F%s&mediaIndex=0&partIndex=0"
+                  "&protocol=http&directPlay=0&directStream=0&audioCodec=mp3&maxAudioBitrate=192&X-Plex-Platform=Chrome"
+                  "&X-Plex-Client-Identifier=%s&X-Plex-Session-Identifier=%s-%s"
+                  "&X-Plex-Client-Profile-Extra=add-transcode-target%%28type%%3DmusicProfile%%26context%%3Dstreaming%%26protocol%%3Dhttp%%26container%%3Dmp3%%26audioCodec%%3Dmp3%%29",
+                  s->base, t->key, client_id, client_id, t->key);
     out[cap - 1] = 0;
 }
 

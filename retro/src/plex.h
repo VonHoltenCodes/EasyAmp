@@ -35,8 +35,9 @@ int plex_alive(const plex_server *s);
 /* node: "" (sections), "section/<key>", "artist/<key>", "album/<key>". Returns a
  * malloc'd array (free it) and its length through *n; NULL on failure. */
 plex_item *plex_browse(const plex_server *s, const char *client_id, const char *node, int *n, char *err, int errcap);
-/* token-free URL for the playlist, and the playable one with the token added */
-void plex_track_url(const plex_server *s, const plex_item *t, char *out, int cap);
+/* token-free URL for the playlist: the file itself when it is MP3, otherwise
+ * the server's transcoder asked for MP3 (those streams cannot seek) */
+void plex_track_url(const plex_server *s, const char *client_id, const plex_item *t, char *out, int cap);
 void plex_auth_url(const plex_server *s, const char *url, char *out, int cap);
 
 #endif

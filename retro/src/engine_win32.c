@@ -41,7 +41,7 @@ static int rd_open(reader *r, const char *path)
 {
     char err[128];
     memset(r, 0, sizeof *r);
-    if (!strncmp(path, "http://", 7)) {
+    if (!strncmp(path, "http://", 7) || !strncmp(path, "https://", 8)) {
         strncpy(r->url, path, sizeof r->url - 1);
         r->hs = net_stream_open(path, 0, &r->size, err, (int)sizeof err);
         return r->hs != 0;

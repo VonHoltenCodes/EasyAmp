@@ -355,14 +355,14 @@ int net_request(const char *method, const char *url, const char *headers, const 
 
 struct ea_stream { conn_t *c; char pend[8192]; int pend_len, pend_pos; };
 
-ea_stream *net_stream_open(const char *url, long offset, long *total_len, char *err, int errcap)
+static ea_stream *stream_open_once(const char *url, long offset, long *total_len, char *err, int errcap, char *redirect, int redircap)
 {
     url_t u;
     ea_stream *s;
     char range[64], head[8192], *end, *p;
     int len = 0, n, status;
-    if (total_len) *total_len = 0;
-    if (!net_init() || !parse_url(url, &u) || u.https) { _snprintf(err, (size_t)errcap, "stream needs a plain http url"); return 0; }
+    redirect[0] = 0;
+    if (!net_init() || !parse_url(url, &u)) { _snprintf(err, (size_t)errcap, "bad stream url"); return 0; }
     s = (ea_stream *)calloc(1, sizeof *s);
     if (!s) return 0;
     s->c = conn_open(&u, 8000, err, errcap);
@@ -379,16 +379,46 @@ ea_stream *net_stream_open(const char *url, long offset, long *total_len, char *
         if (len >= (int)sizeof head - 1) { _snprintf(err, (size_t)errcap, "header too large"); net_stream_close(s); return 0; }
     }
     status = atoi(head + 9);
-    if (status != 200 && status != 206) { _snprintf(err, (size_t)errcap, "server said %d", status); net_stream_close(s); return 0; }
     s->pend_len = len - (int)(end + 4 - head);
     memcpy(s->pend, end + 4, (size_t)s->pend_len);
     *end = 0;
+    if (status >= 301 && status <= 308) {                   /* some servers bounce the "universal" URL to the real one */
+        char *loc = 0;
+        for (p = head; *p; p++) if ((p == head || p[-1] == '\n') && !_strnicmp(p, "location:", 9)) { loc = p + 9; break; }
+        if (loc) {
+            char *eol;
+            while (*loc == ' ') loc++;
+            eol = strchr(loc, '\r'); if (eol) *eol = 0;
+            if (!strncmp(loc, "http", 4)) _snprintf(redirect, (size_t)redircap, "%s", loc);
+            else _snprintf(redirect, (size_t)redircap, "%s://%s:%d%s", u.https ? "https" : "http", u.host, u.port, loc);
+            redirect[redircap - 1] = 0;
+        }
+        net_stream_close(s);
+        if (!redirect[0]) _snprintf(err, (size_t)errcap, "redirect without a location");
+        return 0;
+    }
+    if (status != 200 && status != 206) { _snprintf(err, (size_t)errcap, "server said %d", status); net_stream_close(s); return 0; }
     for (p = head; *p; p++) *p = (char)((*p >= 'A' && *p <= 'Z') ? *p + 32 : *p);
     if (total_len) {
         if ((p = strstr(head, "content-range:")) != 0 && (p = strchr(p, '/')) != 0) *total_len = atol(p + 1);
         else if ((p = strstr(head, "content-length:")) != 0) *total_len = atol(p + 15) + offset;
     }
     return s;
+}
+
+ea_stream *net_stream_open(const char *url, long offset, long *total_len, char *err, int errcap)
+{
+    char cur[1500], next[1500];
+    int hop;
+    if (total_len) *total_len = 0;
+    strncpy(cur, url, sizeof cur - 1); cur[sizeof cur - 1] = 0;
+    for (hop = 0; hop < 4; hop++) {
+        ea_stream *s = stream_open_once(cur, offset, total_len, err, errcap, next, (int)sizeof next);
+        if (s || !next[0]) return s;
+        strcpy(cur, next);
+    }
+    _snprintf(err, (size_t)errcap, "too many redirects");
+    return 0;
 }
 
 int net_stream_read(ea_stream *s, void *buf, int n)

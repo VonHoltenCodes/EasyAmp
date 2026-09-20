@@ -18,6 +18,7 @@ int  json_next(const ea_json *j, int t);                  /* sibling after t's s
 int  json_get(const ea_json *j, int obj, const char *key); /* value token or -1 */
 int  json_str(const ea_json *j, int t, char *out, int cap);
 long json_int(const ea_json *j, int t);
+double json_num(const ea_json *j, int t);                 /* for values past 32 bits */
 int  json_true(const ea_json *j, int t);
 
 void ea_fold_utf8(const char *in, int len, char *out, int cap);
