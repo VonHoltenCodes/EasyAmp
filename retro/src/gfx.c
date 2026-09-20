@@ -392,3 +392,31 @@ void gfx_dither_indexed(const ea_surface *src, int x, int y, int w, int h, unsig
         }
     }
 }
+
+void gfx_downscale(const ea_surface *src, ea_surface *dst, float scale, int dx, int dy, int dw, int dh)
+{
+    /* 16.16 fixed point: one destination pixel covers `step` source pixels */
+    unsigned step = (unsigned)(65536.0f / scale);
+    int X, Y;
+    if (dx < 0) { dw += dx; dx = 0; }
+    if (dy < 0) { dh += dy; dy = 0; }
+    if (dx + dw > dst->w) dw = dst->w - dx;
+    if (dy + dh > dst->h) dh = dst->h - dy;
+    for (Y = dy; Y < dy + dh; Y++) {
+        unsigned sy0 = (unsigned)Y * step, sy1 = sy0 + step;
+        for (X = dx; X < dx + dw; X++) {
+            unsigned sx0 = (unsigned)X * step, sx1 = sx0 + step, r = 0, g = 0, b = 0, wsum = 0, y;
+            for (y = sy0 >> 16; y <= (sy1 - 1) >> 16 && (int)y < src->h; y++) {
+                unsigned ya = y << 16, yb = ya + 65536, wy = ((yb < sy1 ? yb : sy1) - (ya > sy0 ? ya : sy0)) >> 8, x;
+                const ea_px *row = src->px + y * (unsigned)src->w;
+                for (x = sx0 >> 16; x <= (sx1 - 1) >> 16 && (int)x < src->w; x++) {
+                    unsigned xa = x << 16, xb = xa + 65536, wx = ((xb < sx1 ? xb : sx1) - (xa > sx0 ? xa : sx0)) >> 8;
+                    unsigned w = (wx * wy) >> 8;                      /* 0..256 */
+                    ea_px p = row[x];
+                    r += (unsigned)EA_R(p) * w; g += (unsigned)EA_G(p) * w; b += (unsigned)EA_B(p) * w; wsum += w;
+                }
+            }
+            if (wsum) dst->px[Y * dst->w + X] = EA_RGB(r / wsum, g / wsum, b / wsum);
+        }
+    }
+}

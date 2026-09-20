@@ -120,6 +120,21 @@ Verified on real hardware: an HP Pavilion 6460 (Windows 98 SE, Celeron 400,
 
 Not yet: a 2x window for large monitors, album art, gapless playback.
 
+## Small screens
+
+The design is 730 x 578. A screen with less usable height than that (an
+800x600 laptop, a 1024x600 netbook, once the taskbar is subtracted) gets a
+shorter layout: `ui_set_height()` lets the visualizer, the slider banks and
+the lists give up the space, down to `EA_MIN_H` (452), and everything else
+keeps its size and stays pixel-crisp. Only when the screen is still too small
+(640x480 is too narrow) does the shell scale the finished picture down with an
+area-averaging filter (`gfx_downscale`), before colour reduction. The window
+is measured against the work area (`SPI_GETWORKAREA`), re-fitted on
+`WM_DISPLAYCHANGE`, and a remembered position is clamped onto the screen.
+`/fit:WxH` pretends the usable desktop is that size.
+
+![short](docs/retro-short-screen.png)
+
 ## Installer and portable
 
 `installer/easyamp.nsi` builds `EasyAmp-Retro-Setup.exe` with NSIS: its

@@ -85,6 +85,13 @@ void  gfx_dither16(const ea_surface *src, int x, int y, int w, int h,
                    unsigned short *dst, int dst_stride_bytes, int green_bits);
 
 
+/* Last resort for a screen smaller than the layout can shrink to (640x480):
+ * area-average a rect of `src` down into `dst`, which is `scale` (< 1) times
+ * the size. dx..dh is the destination rect. Every source pixel contributes in
+ * proportion to its overlap, so thin lines and small text dim instead of
+ * dropping out. */
+void  gfx_downscale(const ea_surface *src, ea_surface *dst, float scale, int dx, int dy, int dw, int dh);
+
 /* Palettized desktops (256 or 16 colours): dither into a fixed palette.
  * `lut` maps 15-bit RGB to the nearest palette index (tools/mkpalette.py);
  * `spread` is the dither amplitude in 8-bit steps - roughly the distance

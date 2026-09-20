@@ -171,6 +171,34 @@ int main(int argc, char **argv)
         shot(ui, dir, "sources-browse");
         shot_indexed(ui, dir, "sources-browse-256", EA_PAL256, EA_LUT256, 20);
     }
+    /* a short screen (an 800x600 laptop, a 1024x600 netbook): the layout gives up height */
+    m.link_open = 0; m.form_open = 0;
+    ui_set_height(ui, EA_MIN_H);
+    ui_set_page(ui, EA_PAGE_PLAYER); m.state = EA_PLAYING; ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "short-player");
+    m.show_eq = 0; ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "short-player-no-eq");
+    m.show_eq = 1; m.viz_vu = 1; ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "short-player-vu");
+    m.viz_vu = 0;
+    ui_set_page(ui, EA_PAGE_EQ); shot(ui, dir, "short-equalizer");
+    ui_set_page(ui, EA_PAGE_SOURCES); shot(ui, dir, "short-sources");
+    m.form_open = 1; ui_model_changed(ui, UI_CH_SOURCES); shot(ui, dir, "short-sources-form");
+    m.form_open = 0; m.link_open = 1; strcpy(m.link_code, "B8Z2"); ui_model_changed(ui, UI_CH_SOURCES); shot(ui, dir, "short-sources-link");
+    m.link_open = 0;
+    ui_set_height(ui, 548); ui_set_page(ui, EA_PAGE_PLAYER); ui_model_changed(ui, UI_CH_ALL); shot(ui, dir, "netbook-player");
+    {   /* a 640x480 desktop: too narrow for the layout, so the picture is scaled to fit */
+        static ea_px small[640 * 480];
+        ea_surface out, *full;
+        float sc = 640.0f / EA_WIN_W;
+        ea_rect d[8];
+        char path[512];
+        ui_set_height(ui, EA_MIN_H);
+        ui_render(ui, d, 8);
+        full = ui_surface(ui);
+        gfx_init(&out, 640, (int)(EA_MIN_H * sc), small);
+        gfx_downscale(full, &out, sc, 0, 0, out.w, out.h);
+        sprintf(path, "%s/scaled-640x480.bmp", dir);
+        write_bmp(path, &out);
+        printf("%s\n", path);
+    }
     ui_destroy(ui);
     return 0;
 }

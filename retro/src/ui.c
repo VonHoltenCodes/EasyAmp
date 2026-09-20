@@ -87,6 +87,8 @@ enum { ID_NONE, ID_EQ_SHOW, ID_PL_SHOW, ID_VU, ID_EQ_ON, ID_BASS, ID_LOUD, ID_PR
        ID_PRESETS2, ID_IMPORT, ID_EXPORT, ID_RESET, ID_TAB0, ID_TAB1, ID_TAB2,
        ID_K_BANDS, ID_K_PREAMP, ID_K_IN, ID_K_OUT, ID_K_BAL, ID_K_PITCH, ID_K_FREQ, ID_K_Q };
 
+enum { FX_FIXED, FX_SHIFT, FX_STRETCH, FX_CUSTOM };   /* keep / move with the bottom edge / shrink / set by relayout */
+
 #define PG(p) (1 << (p))
 #define PG_ALL 7
 
@@ -96,6 +98,8 @@ typedef struct {
     const char *label;
     int arg;                       /* command id or icon */
     int hover, down, dirty, hidden;
+    int flex;                      /* how it follows a shorter window: FX_* */
+    ea_rect r0;                    /* its rect at the full design height */
     float vmin, vmax, vstep, vdef; /* knobs */
 } widget;
 
@@ -122,7 +126,11 @@ struct ea_ui {
     /* overlay menu */
     struct { int open, owner, n, hover; ea_rect r; const char *items[MAX_MENU]; } menu;
     /* player-page layout, recomputed when the EQ / PL panels are shown or hidden */
-    struct { ea_rect display, viz, xport, eqbar, eqctl, eqsmall; int eq, pl; } L;
+    struct { ea_rect display, viz, xport, eqbar, eqctl, eqsmall, footer, pllist, plbtns,
+                     logspec, wave, bank, lower, ledmtr, srcacct, srcbtns, liblist, libbtns, linkdlg, formdlg;
+             int eq, pl, h, delta; } L;
+    int height;
+    int ix_logspec;                /* then K_WAVE, K_BANK follow it */
     int ix_status, ix_info, ix_scope, ix_seek, ix_viz, ix_xport, ix_led, ix_eqbtn, ix_eqsmall, ix_pl, ix_plbtn;
     int dlg_was_open, dlg_hover, dlg_down;
     int caret_on, caret_acc, mods;
@@ -306,12 +314,12 @@ static void chrome_common(ea_ui *ui)
     ea_surface *s = &ui->bg;
     char ver[48];
     (void)ver;
-    gfx_fill(s, 0, 0, EA_WIN_W, EA_WIN_H, C_CHASSIS);
-    gfx_scanlines(s, 0, 0, EA_WIN_W, EA_WIN_H, 6, 5, 26);
-    gfx_frame(s, 0, 0, EA_WIN_W, EA_WIN_H, C_METAL_HI, C_METAL_LO);
+    gfx_fill(s, 0, 0, EA_WIN_W, ui->height, C_CHASSIS);
+    gfx_scanlines(s, 0, 0, EA_WIN_W, ui->height, 6, 5, 26);
+    gfx_frame(s, 0, 0, EA_WIN_W, ui->height, C_METAL_HI, C_METAL_LO);
     title_bar(s, &R_TITLE, "EASYAMP", &EA_FONT_TITLE, C_TITLE, 3, 46);
-    gfx_fill(s, R_FOOTER.x, R_FOOTER.y, R_FOOTER.w, R_FOOTER.h, C_FOOT);
-    gfx_fill(s, R_FOOTER.x, R_FOOTER.y, R_FOOTER.w, 1, C_BTN_DARK);
+    gfx_fill(s, ui->L.footer.x, ui->L.footer.y, ui->L.footer.w, ui->L.footer.h, C_FOOT);
+    gfx_fill(s, ui->L.footer.x, ui->L.footer.y, ui->L.footer.w, 1, C_BTN_DARK);
 }
 
 static void separator(ea_surface *s, int x, int y, int h)
@@ -334,8 +342,8 @@ static void chrome_player(ea_ui *ui)
     }
     if (ui->L.pl) {
         title_bar(s, &R_PLBAR, "EASYAMP PLAYLIST", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
-        well(s, &R_PLLIST, C_PLAYLIST, C_WELL_EDGE, 12, 230);
-        metal_panel(s, &R_PLBTNS);
+        well(s, &ui->L.pllist, C_PLAYLIST, C_WELL_EDGE, 12, 230);
+        metal_panel(s, &ui->L.plbtns);
     }
 }
 
@@ -343,19 +351,20 @@ static void chrome_eq(ea_ui *ui)
 {
     ea_surface *s = &ui->bg;
     static const char *klabels[8] = { "BANDS", "PREAMP", "IN", "OUT", "BALANCE", "PITCH", "SEL FREQ", "SEL Q" };
-    int i;
+    int i, dy = ui->L.delta;
     lcd_well(s, &R_EQTOP);
-    well(s, &R_LOGSPEC, C_BLACK, C_WELL_EDGE, 8, 255);
-    well(s, &R_WAVE, C_BLACK, C_WELL_EDGE, 8, 255);
-    smoke(s, &R_BANK);
-    metal_panel(s, &R_LOWER);
-    well(s, &R_LEDMTR, C_BLACK, C_WELL_EDGE, 0, 0);
+    well(s, &ui->L.logspec, C_BLACK, C_WELL_EDGE, 8, 255);
+    well(s, &ui->L.wave, C_BLACK, C_WELL_EDGE, 8, 255);
+    smoke(s, &ui->L.bank);
+    metal_panel(s, &ui->L.lower);
+    well(s, &ui->L.ledmtr, C_BLACK, C_WELL_EDGE, 0, 0);
     for (i = 0; i < 8; i++) {
         ea_rect c;
-        c.x = 109 + i * 64; c.y = 412; c.w = 64; c.h = 12;
+        c.x = 109 + i * 64; c.y = 412 - dy; c.w = 64; c.h = 12;
         text_center(s, &EA_FONT_CTL, &c, klabels[i], C_CTLLABEL, 1, 0);
     }
     { ea_rect a = { 219, 494, 88, 12 }, b = { 317, 494, 150, 12 };
+      a.y -= dy; b.y -= dy;
       text_center(s, &EA_FONT_CTL, &a, "EQ PRESETS", C_CTLLABEL, 1, 0);
       text_center(s, &EA_FONT_CTL, &b, "APO / GEQ", C_CTLLABEL, 1, 0); }
 }
@@ -364,13 +373,13 @@ static void chrome_sources(ea_ui *ui)
 {
     ea_surface *s = &ui->bg;
     title_bar(s, &R_SRCBAR, "EASYAMP SOURCES", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
-    well(s, &R_SRCACCT, C_PLAYLIST, C_WELL_EDGE, 12, 230);
-    metal_panel(s, &R_SRCBTNS);
+    well(s, &ui->L.srcacct, C_PLAYLIST, C_WELL_EDGE, 12, 230);
+    metal_panel(s, &ui->L.srcbtns);
     title_bar(s, &R_LIBBAR, "LIBRARY", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
     gfx_fill(s, R_CRUMB.x, R_CRUMB.y, R_CRUMB.w, R_CRUMB.h, EA_RGB(0x05, 0x08, 0x07));
     gfx_fill(s, R_CRUMB.x, R_CRUMB.y + R_CRUMB.h - 1, R_CRUMB.w, 1, C_BAR_LO);
-    well(s, &R_LIBLIST, C_PLAYLIST, C_WELL_EDGE, 12, 230);
-    metal_panel(s, &R_LIBBTNS);
+    well(s, &ui->L.liblist, C_PLAYLIST, C_WELL_EDGE, 12, 230);
+    metal_panel(s, &ui->L.libbtns);
 }
 
 static void build_bg(ea_ui *ui)
@@ -958,15 +967,16 @@ static void draw_srcstatus(ea_ui *ui, widget *w)
 }
 
 /* the link dialog: the code goes to a PHONE, this PC cannot open plex.tv */
-static const ea_rect R_LINKCANCEL = { 275, 336, 180, 28 };
+static void link_cancel_rect(ea_ui *ui, ea_rect *b) { b->x = 275; b->y = ui->L.linkdlg.y + 146; b->w = 180; b->h = 28; }
 
 static void draw_linkdlg(ea_ui *ui, int cancel_hover, int cancel_down)
 {
     ea_surface *s = &ui->fb;
-    const ea_rect *r = &R_LINKDLG;
-    ea_rect line = *r, btn = R_LINKCANCEL;
+    const ea_rect *r = &ui->L.linkdlg;
+    ea_rect line = *r, btn;
     int cw, base;
-    gfx_fill_a(s, 0, 0, EA_WIN_W, EA_WIN_H, C_BLACK, 120);                       /* dim the page behind */
+    link_cancel_rect(ui, &btn);
+    gfx_fill_a(s, 0, 0, EA_WIN_W, ui->height, C_BLACK, 120);                       /* dim the page behind */
     gfx_fill_a(s, r->x + 4, r->y + 4, r->w, r->h, C_BLACK, 130);
     gfx_fill(s, r->x, r->y, r->w, r->h, EA_RGB(0x23, 0x2b, 0x4a));
     gfx_scanlines(s, r->x, r->y, r->w, r->h, 8, 6, 26);
@@ -1198,8 +1208,8 @@ static void draw_menu(ea_ui *ui)
 
 static const char *FORM_LABEL[3] = { "SERVER  (like 192.168.1.5:8096)", "USERNAME", "PASSWORD" };
 
-static void form_field_rect(int i, ea_rect *r) { r->x = R_FORMDLG.x + 20; r->y = R_FORMDLG.y + 52 + i * 46; r->w = R_FORMDLG.w - 40; r->h = 22; }
-static void form_button_rect(int i, ea_rect *r) { r->x = R_FORMDLG.x + 20 + i * 155; r->y = R_FORMDLG.y + 226; r->w = 145; r->h = 28; }
+static void form_field_rect(ea_ui *ui, int i, ea_rect *r) { r->x = ui->L.formdlg.x + 20; r->y = ui->L.formdlg.y + 52 + i * 46; r->w = ui->L.formdlg.w - 40; r->h = 22; }
+static void form_button_rect(ea_ui *ui, int i, ea_rect *r) { r->x = ui->L.formdlg.x + 20 + i * 155; r->y = ui->L.formdlg.y + 226; r->w = 145; r->h = 28; }
 
 static void dlg_button(ea_surface *s, const ea_rect *b, const char *label, int hover, int down)
 {
@@ -1211,11 +1221,11 @@ static void dlg_button(ea_surface *s, const ea_rect *b, const char *label, int h
 static void draw_formdlg(ea_ui *ui)
 {
     ea_surface *s = &ui->fb;
-    const ea_rect *r = &R_FORMDLG;
+    const ea_rect *r = &ui->L.formdlg;
     ea_model *m = ui->m;
     ea_rect line = *r, f, b;
     int i;
-    gfx_fill_a(s, 0, 0, EA_WIN_W, EA_WIN_H, C_BLACK, 120);
+    gfx_fill_a(s, 0, 0, EA_WIN_W, ui->height, C_BLACK, 120);
     gfx_fill_a(s, r->x + 4, r->y + 4, r->w, r->h, C_BLACK, 130);
     gfx_fill(s, r->x, r->y, r->w, r->h, EA_RGB(0x23, 0x2b, 0x4a));
     gfx_scanlines(s, r->x, r->y, r->w, r->h, 8, 6, 26);
@@ -1225,7 +1235,7 @@ static void draw_formdlg(ea_ui *ui)
     for (i = 0; i < 3; i++) {
         char shown[130];
         int n = (int)strlen(m->form_field[i]), k, tw, focus = i == m->form_focus;
-        form_field_rect(i, &f);
+        form_field_rect(ui, i, &f);
         gfx_text(s, &EA_FONT_IND, f.x, f.y - 5, FORM_LABEL[i], C_CTLLABEL, 1, 0, 0);
         gfx_fill(s, f.x, f.y, f.w, f.h, EA_RGB(0x10, 0x13, 0x1f));
         gfx_frame(s, f.x, f.y, f.w, f.h, focus ? C_LCD_ON : EA_RGB(0x45, 0x4f, 0x7a), focus ? C_LCD_ON : EA_RGB(0x45, 0x4f, 0x7a));
@@ -1242,8 +1252,8 @@ static void draw_formdlg(ea_ui *ui)
     gfx_clip(s, r->x + 6, line.y, r->w - 12, 16);
     text_center(s, &EA_FONT_IND, &line, m->form_status, C_LCD_ON, 1, 0);
     gfx_unclip(s);
-    form_button_rect(0, &b); dlg_button(s, &b, "SIGN IN + ADD", ui->dlg_hover == 1, ui->dlg_down == 1);
-    form_button_rect(1, &b); dlg_button(s, &b, "CANCEL", ui->dlg_hover == 2, ui->dlg_down == 2);
+    form_button_rect(ui, 0, &b); dlg_button(s, &b, "SIGN IN + ADD", ui->dlg_hover == 1, ui->dlg_down == 1);
+    form_button_rect(ui, 1, &b); dlg_button(s, &b, "CANCEL", ui->dlg_hover == 2, ui->dlg_down == 2);
 }
 
 /* ======================================================================== */
@@ -1256,6 +1266,7 @@ static widget *add(ea_ui *ui, int kind, int pages, int x, int y, int w, int h, c
     memset(n, 0, sizeof *n);
     n->kind = kind; n->pages = pages; n->label = label; n->id = id; n->arg = arg;
     n->r.x = x; n->r.y = y; n->r.w = w; n->r.h = h;
+    n->r0 = n->r;
     n->dirty = 1;
     return n;
 }
@@ -1263,7 +1274,7 @@ static widget *add(ea_ui *ui, int kind, int pages, int x, int y, int w, int h, c
 static void add_knob(ea_ui *ui, int i, int id, float lo, float hi, float step, float def)
 {
     widget *k = add(ui, K_KNOB, PG(EA_PAGE_EQ), 114 + i * 64, 426, 54, 58, 0, id, 0);
-    k->vmin = lo; k->vmax = hi; k->vstep = step; k->vdef = def;
+    k->vmin = lo; k->vmax = hi; k->vstep = step; k->vdef = def; k->flex = FX_SHIFT;
 }
 
 static void build_widgets(ea_ui *ui)
@@ -1273,10 +1284,10 @@ static void build_widgets(ea_ui *ui)
     /* window */
     add(ui, K_WINBTN, PG_ALL, 683, 7, 19, 18, 0, 0, EA_CMD_WIN_MINIMIZE);
     add(ui, K_WINBTN, PG_ALL, 704, 7, 19, 18, 0, 0, EA_CMD_WIN_CLOSE);
-    add(ui, K_TAB, PG_ALL, 6, 555, 66, 20, "PLAYER", ID_TAB0, EA_PAGE_PLAYER);
-    add(ui, K_TAB, PG_ALL, 72, 555, 88, 20, "EQUALIZER", ID_TAB1, EA_PAGE_EQ);
-    add(ui, K_TAB, PG_ALL, 160, 555, 74, 20, "SOURCES", ID_TAB2, EA_PAGE_SOURCES);
-    add(ui, K_FOOTSTAT, PG_ALL, 500, 555, 227, 20, 0, 0, EA_CMD_OPEN_UPDATE);
+    add(ui, K_TAB, PG_ALL, 6, 555, 66, 20, "PLAYER", ID_TAB0, EA_PAGE_PLAYER)->flex = FX_SHIFT;
+    add(ui, K_TAB, PG_ALL, 72, 555, 88, 20, "EQUALIZER", ID_TAB1, EA_PAGE_EQ)->flex = FX_SHIFT;
+    add(ui, K_TAB, PG_ALL, 160, 555, 74, 20, "SOURCES", ID_TAB2, EA_PAGE_SOURCES)->flex = FX_SHIFT;
+    add(ui, K_FOOTSTAT, PG_ALL, 500, 555, 227, 20, 0, 0, EA_CMD_OPEN_UPDATE)->flex = FX_SHIFT;
     /* player: display */
     ui->ix_status = ui->nw; add(ui, K_STATUS, P, 9, 36, 176, 50, 0, 0, 0);
     ui->ix_info = ui->nw; add(ui, K_INFO, P, 194, 38, 238, 40, 0, 0, 0);
@@ -1297,20 +1308,21 @@ static void build_widgets(ea_ui *ui)
     ui->ix_eqsmall = ui->nw;
     add(ui, K_EQSMALL, P, R_EQSMALL.x, R_EQSMALL.y, R_EQSMALL.w, R_EQSMALL.h, 0, 0, 0);
     ui->ix_pl = ui->nw;
-    add(ui, K_PLAYLIST, P, R_PLLIST.x, R_PLLIST.y, R_PLLIST.w, R_PLLIST.h, 0, 0, 0);
+    add(ui, K_PLAYLIST, P, R_PLLIST.x, R_PLLIST.y, R_PLLIST.w, R_PLLIST.h, 0, 0, 0)->flex = FX_STRETCH;
     ui->ix_plbtn = ui->nw;
-    add(ui, K_STACKBTN, P, 448, 517, 44, 30, "+FILE", 0, EA_CMD_PL_ADD);
-    add(ui, K_STACKBTN, P, 495, 517, 44, 30, "-FILE", 0, EA_CMD_PL_REMOVE);
-    add(ui, K_BUTTON, P, 542, 517, 44, 30, "CLR", 0, EA_CMD_PL_CLEAR);
-    add(ui, K_BUTTON, P, 589, 517, 52, 30, "LOAD", 0, EA_CMD_PL_LOAD);
-    add(ui, K_BUTTON, P, 644, 517, 52, 30, "SAVE", 0, EA_CMD_PL_SAVE);
+    add(ui, K_STACKBTN, P, 448, 517, 44, 30, "+FILE", 0, EA_CMD_PL_ADD)->flex = FX_SHIFT;
+    add(ui, K_STACKBTN, P, 495, 517, 44, 30, "-FILE", 0, EA_CMD_PL_REMOVE)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, P, 542, 517, 44, 30, "CLR", 0, EA_CMD_PL_CLEAR)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, P, 589, 517, 52, 30, "LOAD", 0, EA_CMD_PL_LOAD)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, P, 644, 517, 52, 30, "SAVE", 0, EA_CMD_PL_SAVE)->flex = FX_SHIFT;
     /* equalizer */
     for (i = 0; i < 5; i++) add(ui, K_XPORT, E, 11 + i * 36, 39, 34, 28, 0, 0, xcmd[i]);
     add(ui, K_EQTIME, E, 198, 36, 520, 34, 0, 0, 0);
+    ui->ix_logspec = ui->nw;
     add(ui, K_LOGSPEC, E, R_LOGSPEC.x, R_LOGSPEC.y, R_LOGSPEC.w, R_LOGSPEC.h, 0, 0, 0);
     add(ui, K_WAVE, E, R_WAVE.x, R_WAVE.y, R_WAVE.w, R_WAVE.h, 0, 0, 0);
     add(ui, K_BANK, E, R_BANK.x, R_BANK.y, R_BANK.w, R_BANK.h, 0, 0, 0);
-    add(ui, K_LEDMETER, E, R_LEDMTR.x + 1, R_LEDMTR.y + 1, R_LEDMTR.w - 2, R_LEDMTR.h - 2, 0, 0, 0);
+    add(ui, K_LEDMETER, E, R_LEDMTR.x + 1, R_LEDMTR.y + 1, R_LEDMTR.w - 2, R_LEDMTR.h - 2, 0, 0, 0)->flex = FX_SHIFT;
     add_knob(ui, 0, ID_K_BANDS, 10, 32, 1, 10);
     add_knob(ui, 1, ID_K_PREAMP, -12, 12, 0.5f, 0);
     add_knob(ui, 2, ID_K_IN, -12, 12, 0.5f, 0);
@@ -1319,51 +1331,107 @@ static void build_widgets(ea_ui *ui)
     add_knob(ui, 5, ID_K_PITCH, 0.90f, 1.10f, 0.01f, 1.0f);
     add_knob(ui, 6, ID_K_FREQ, 1.30103f, 4.30103f, 0.02f, 3.0f);
     add_knob(ui, 7, ID_K_Q, 0.3f, 12.0f, 0.1f, EA_DEFAULT_Q);
-    add(ui, K_MENUBTN, E, 219, 510, 88, 28, "PRESETS", ID_PRESETS2, 0);
-    add(ui, K_BUTTON, E, 317, 510, 66, 28, "IMPORT", ID_IMPORT, EA_CMD_EQ_IMPORT);
-    add(ui, K_MENUBTN, E, 387, 510, 80, 28, "EXPORT", ID_EXPORT, 0);
-    add(ui, K_BUTTON, E, 477, 510, 58, 28, "RESET", ID_RESET, 0);
+    add(ui, K_MENUBTN, E, 219, 510, 88, 28, "PRESETS", ID_PRESETS2, 0)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, E, 317, 510, 66, 28, "IMPORT", ID_IMPORT, EA_CMD_EQ_IMPORT)->flex = FX_SHIFT;
+    add(ui, K_MENUBTN, E, 387, 510, 80, 28, "EXPORT", ID_EXPORT, 0)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, E, 477, 510, 58, 28, "RESET", ID_RESET, 0)->flex = FX_SHIFT;
     /* sources */
-    add(ui, K_SRCACCT, S, R_SRCACCT.x, R_SRCACCT.y, R_SRCACCT.w, R_SRCACCT.h, 0, 0, 0);
-    add(ui, K_BUTTON, S, 9, 517, 62, 30, "+PLEX", 0, EA_CMD_SRC_LINK);
-    add(ui, K_BUTTON, S, 74, 517, 98, 30, "+JELLYFIN", 0, EA_CMD_SRC_JELLYFIN);
-    add(ui, K_BUTTON, S, 175, 517, 52, 30, "REM", 0, EA_CMD_SRC_REMOVE);
+    add(ui, K_SRCACCT, S, R_SRCACCT.x, R_SRCACCT.y, R_SRCACCT.w, R_SRCACCT.h, 0, 0, 0)->flex = FX_STRETCH;
+    add(ui, K_BUTTON, S, 9, 517, 62, 30, "+PLEX", 0, EA_CMD_SRC_LINK)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, S, 74, 517, 98, 30, "+JELLYFIN", 0, EA_CMD_SRC_JELLYFIN)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, S, 175, 517, 52, 30, "REM", 0, EA_CMD_SRC_REMOVE)->flex = FX_SHIFT;
     add(ui, K_CRUMB, S, R_CRUMB.x, R_CRUMB.y, R_CRUMB.w, R_CRUMB.h - 1, 0, 0, 0);
-    add(ui, K_LIBLIST, S, R_LIBLIST.x, R_LIBLIST.y, R_LIBLIST.w, R_LIBLIST.h, 0, 0, 0);
-    add(ui, K_BUTTON, S, 250, 517, 58, 30, "BACK", 0, EA_CMD_SRC_BACK);
-    add(ui, K_BUTTON, S, 311, 517, 58, 30, "PLAY", 0, EA_CMD_SRC_PLAY);
-    add(ui, K_BUTTON, S, 372, 517, 52, 30, "ADD", 0, EA_CMD_SRC_ADD);
-    add(ui, K_BUTTON, S, 427, 517, 78, 30, "ADD ALL", 0, EA_CMD_SRC_ADD_ALL);
-    add(ui, K_SRCSTATUS, S, 514, 517, 208, 30, 0, 0, 0);
+    add(ui, K_LIBLIST, S, R_LIBLIST.x, R_LIBLIST.y, R_LIBLIST.w, R_LIBLIST.h, 0, 0, 0)->flex = FX_STRETCH;
+    add(ui, K_BUTTON, S, 250, 517, 58, 30, "BACK", 0, EA_CMD_SRC_BACK)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, S, 311, 517, 58, 30, "PLAY", 0, EA_CMD_SRC_PLAY)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, S, 372, 517, 52, 30, "ADD", 0, EA_CMD_SRC_ADD)->flex = FX_SHIFT;
+    add(ui, K_BUTTON, S, 427, 517, 78, 30, "ADD ALL", 0, EA_CMD_SRC_ADD_ALL)->flex = FX_SHIFT;
+    add(ui, K_SRCSTATUS, S, 514, 517, 208, 30, 0, 0, 0)->flex = FX_SHIFT;
 }
 
-/* Player page geometry for the current EQ / PL visibility. Hiding the playlist
- * widens the left column to the full window; hiding the EQ lets the
- * visualizer grow into its space and drops the transport strip to the bottom. */
+static void close_menu_fwd(ea_ui *ui);
+
+/* All geometry that depends on the window height or on the EQ / PL panels.
+ *
+ * A shorter window (delta = how much below the full design height) is paid for
+ * by the elements that can afford it: on the player page the visualizer first
+ * and then the slider bank, on the equalizer page the meters and then the
+ * bank, on the sources page the lists. Buttons, the display and the text keep
+ * their size. Hiding the playlist widens the left column to the full window;
+ * hiding the EQ lets the visualizer grow into its space. */
 static void relayout(ea_ui *ui)
 {
     int eq = ui->m->show_eq, pl = ui->m->show_pl, lw = pl ? 436 : 724, i;
-    int viz_h = eq ? 138 : 381, xy = 130 + viz_h + 2;
+    int delta = EA_WIN_H - ui->height, d1, d2, viz_h, xy;
     ea_rect *r;
-    ui->L.eq = eq; ui->L.pl = pl;
+    ui->L.eq = eq; ui->L.pl = pl; ui->L.h = ui->height; ui->L.delta = delta;
+
+    /* every widget that simply follows the bottom edge, or stretches to it */
+    for (i = 0; i < ui->nw; i++) {
+        widget *w = &ui->w[i];
+        if (w->flex == FX_SHIFT) w->r.y = w->r0.y - delta;
+        else if (w->flex == FX_STRETCH) w->r.h = w->r0.h - delta;
+    }
+    ui->L.footer = R_FOOTER;   ui->L.footer.y -= delta;
+    ui->L.pllist = R_PLLIST;   ui->L.pllist.h -= delta;
+    ui->L.plbtns = R_PLBTNS;   ui->L.plbtns.y -= delta;
+    ui->L.srcacct = R_SRCACCT; ui->L.srcacct.h -= delta;
+    ui->L.srcbtns = R_SRCBTNS; ui->L.srcbtns.y -= delta;
+    ui->L.liblist = R_LIBLIST; ui->L.liblist.h -= delta;
+    ui->L.libbtns = R_LIBBTNS; ui->L.libbtns.y -= delta;
+    ui->L.linkdlg = R_LINKDLG; ui->L.linkdlg.y = (ui->height - R_LINKDLG.h) / 2 - 4;
+    ui->L.formdlg = R_FORMDLG; ui->L.formdlg.y = (ui->height - R_FORMDLG.h) / 2 - 4;
+
+    /* player page */
+    if (eq) { d1 = delta < 78 ? delta : 78; d2 = delta - d1; viz_h = 138 - d1; }
+    else    { d1 = delta; d2 = 0; viz_h = 381 - delta; }
+    xy = 130 + viz_h + 2;
     ui->L.display = R_DISPLAY; ui->L.display.w = lw;
     ui->L.viz = R_VIZ; ui->L.viz.w = lw; ui->L.viz.h = viz_h;
     ui->L.xport = R_XPORT; ui->L.xport.w = lw; ui->L.xport.y = xy;
-    ui->L.eqbar = R_EQBAR; ui->L.eqbar.w = lw;
-    ui->L.eqctl = R_EQCTL; ui->L.eqctl.w = lw;
-    ui->L.eqsmall = R_EQSMALL; ui->L.eqsmall.w = lw;
+    ui->L.eqbar = R_EQBAR; ui->L.eqbar.w = lw; ui->L.eqbar.y = xy + 41;
+    ui->L.eqctl = R_EQCTL; ui->L.eqctl.w = lw; ui->L.eqctl.y = xy + 65;
+    ui->L.eqsmall = R_EQSMALL; ui->L.eqsmall.w = lw; ui->L.eqsmall.y = xy + 103; ui->L.eqsmall.h = 178 - d2;
     ui->w[ui->ix_info].r.w = lw - 198;
     ui->w[ui->ix_seek].r.w = lw - 198;
     ui->w[ui->ix_viz].r = ui->L.viz;
     for (i = 0; i < 5; i++) ui->w[ui->ix_xport + i].r.y = xy + 5;
     for (i = 0; i < 3; i++) ui->w[ui->ix_led + i].r.y = xy + 5;
-    for (i = 0; i < 4; i++) ui->w[ui->ix_eqbtn + i].hidden = !eq;
+    for (i = 0; i < 4; i++) { ui->w[ui->ix_eqbtn + i].hidden = !eq; ui->w[ui->ix_eqbtn + i].r.y = ui->L.eqctl.y + 5; }
     r = &ui->w[ui->ix_eqbtn + 3].r; r->x = 3 + lw - 93;                 /* PRESETS hugs the right edge */
     ui->w[ui->ix_eqsmall].hidden = !eq; ui->w[ui->ix_eqsmall].r = ui->L.eqsmall;
     ui->w[ui->ix_pl].hidden = !pl;
     for (i = 0; i < 5; i++) ui->w[ui->ix_plbtn + i].hidden = !pl;
+
+    /* equalizer page: the meters give up 30, the bank the rest */
+    d1 = delta < 30 ? delta : 30; d2 = delta - d1;
+    ui->L.logspec = R_LOGSPEC; ui->L.logspec.h -= d1;
+    ui->L.wave = R_WAVE;       ui->L.wave.h -= d1;
+    ui->L.bank = R_BANK;       ui->L.bank.y -= d1; ui->L.bank.h -= d2;
+    ui->L.lower = R_LOWER;     ui->L.lower.y -= delta;
+    ui->L.ledmtr = R_LEDMTR;   ui->L.ledmtr.y -= delta;
+    ui->w[ui->ix_logspec].r = ui->L.logspec;
+    ui->w[ui->ix_logspec + 1].r = ui->L.wave;
+    ui->w[ui->ix_logspec + 2].r = ui->L.bank;
+
     ui->bg_page = -1;                                                  /* chrome must be repainted */
 }
+
+void ui_set_height(ea_ui *ui, int height)
+{
+    if (height > EA_WIN_H) height = EA_WIN_H;
+    if (height < EA_MIN_H) height = EA_MIN_H;
+    if (height == ui->height) return;
+    ui->height = height;
+    ui->fb.h = ui->bg.h = height;
+    gfx_unclip(&ui->fb); gfx_unclip(&ui->bg);
+    close_menu_fwd(ui);
+    ui->capture = -1;
+    relayout(ui);
+    ui->full_dirty = 1;
+}
+
+int ui_height(ea_ui *ui) { return ui->height; }
 
 static int on_page(ea_ui *ui, const widget *w) { return !w->hidden && (w->pages & PG(ui->m->page)) != 0; }
 
@@ -1422,6 +1490,7 @@ ea_ui *ui_create(ea_model *m, const ea_actions *a, ea_px *pixels)
     ui->capture = ui->hover = -1;
     ui->menu.hover = -1;
     ui->bg_page = -1;
+    ui->height = EA_WIN_H;
     build_widgets(ui);
     ui->L.eq = ui->L.pl = -1;
     return ui;
@@ -1445,6 +1514,8 @@ static void close_menu(ea_ui *ui)
     ui->full_dirty = 1;            /* simplest correct way to lift an overlay */
     for (i = 0; i < ui->nw; i++) ui->w[i].dirty = 1;
 }
+
+static void close_menu_fwd(ea_ui *ui) { close_menu(ui); }
 
 void ui_list_reset(ea_ui *ui) { ui->lib.scroll = 0; ui->lib.anchor = 0; mark_kind(ui, K_LIBLIST); }
 
@@ -1496,13 +1567,13 @@ static int intersects(const ea_rect *a, const ea_rect *b)
 int ui_render(ea_ui *ui, ea_rect *dirty, int max)
 {
     int i, n = 0, menu_hit = 0, dlg = (ui->m->link_open || ui->m->form_open) && ui->m->page == EA_PAGE_SOURCES;
-    if (ui->L.eq != ui->m->show_eq || ui->L.pl != ui->m->show_pl) { close_menu(ui); ui->capture = -1; relayout(ui); }
+    if (ui->L.eq != ui->m->show_eq || ui->L.pl != ui->m->show_pl || ui->L.h != ui->height) { close_menu(ui); ui->capture = -1; relayout(ui); }
     if (ui->bg_page != ui->m->page) { build_bg(ui); ui->full_dirty = 1; }
     /* a modal dialog dims the whole page, so while it is up every change is a full repaint */
     if (dlg || ui->dlg_was_open != dlg) { for (i = 0; i < ui->nw; i++) if (ui->w[i].dirty) ui->full_dirty = 1; }
     if (ui->dlg_was_open != dlg) { ui->full_dirty = 1; ui->dlg_was_open = dlg; }
     if (ui->full_dirty) {
-        gfx_blit(&ui->fb, 0, 0, &ui->bg, 0, 0, EA_WIN_W, EA_WIN_H);
+        gfx_blit(&ui->fb, 0, 0, &ui->bg, 0, 0, EA_WIN_W, ui->height);
         for (i = 0; i < ui->nw; i++) ui->w[i].dirty = 1;
     }
     for (i = 0; i < ui->nw; i++) {
@@ -1537,7 +1608,7 @@ int ui_render(ea_ui *ui, ea_rect *dirty, int max)
     if (ui->full_dirty && dlg) { if (ui->m->form_open) draw_formdlg(ui); else draw_linkdlg(ui, ui->dlg_hover, ui->dlg_down); }
     if (ui->full_dirty) {
         ui->full_dirty = 0;
-        if (max > 0) { dirty[0].x = dirty[0].y = 0; dirty[0].w = EA_WIN_W; dirty[0].h = EA_WIN_H; }
+        if (max > 0) { dirty[0].x = dirty[0].y = 0; dirty[0].w = EA_WIN_W; dirty[0].h = ui->height; }
         return 1;
     }
     return n;
@@ -1671,9 +1742,9 @@ static int dlg_active(ea_ui *ui) { return (ui->m->link_open || ui->m->form_open)
 static int dlg_button_at(ea_ui *ui, int x, int y)
 {
     ea_rect b;
-    if (!ui->m->form_open) return inside(&R_LINKCANCEL, x, y) ? 1 : 0;
-    form_button_rect(0, &b); if (inside(&b, x, y)) return 1;
-    form_button_rect(1, &b); if (inside(&b, x, y)) return 2;
+    if (!ui->m->form_open) { link_cancel_rect(ui, &b); return inside(&b, x, y) ? 1 : 0; }
+    form_button_rect(ui, 0, &b); if (inside(&b, x, y)) return 1;
+    form_button_rect(ui, 1, &b); if (inside(&b, x, y)) return 2;
     return 0;
 }
 
@@ -1722,7 +1793,7 @@ void ui_mouse_down(ea_ui *ui, int x, int y)
         int b = dlg_button_at(ui, x, y), k;
         if (b) { ui->dlg_down = b; ui->full_dirty = 1; }
         else if (ui->m->form_open)
-            for (k = 0; k < 3; k++) { ea_rect f; form_field_rect(k, &f); if (inside(&f, x, y)) { ui->m->form_focus = k; ui->caret_on = 1; ui->full_dirty = 1; } }
+            for (k = 0; k < 3; k++) { ea_rect f; form_field_rect(ui, k, &f); if (inside(&f, x, y)) { ui->m->form_focus = k; ui->caret_on = 1; ui->full_dirty = 1; } }
         return;
     }
     if (ui->menu.open) {
@@ -1849,11 +1920,11 @@ void ui_key(ea_ui *ui, int key)
         if (key == UI_KEY_ENTER) { if (m->sel >= 0 && ui->act.play_index) ui->act.play_index(ui->act.ctx, m->sel); return; }
         if (key == UI_KEY_DELETE) { command(ui, EA_CMD_PL_REMOVE); return; }
         if (key == UI_KEY_SELECT_ALL) { marks_set(ui, pl_mark, m->ntracks, 0, m->ntracks - 1, 1); mark_kind(ui, K_PLAYLIST); return; }
-        { int to = m->sel; if (nav(key, &to, m->ntracks, lv_rows(&R_PLLIST))) { int keep = ui->mods; ui->mods &= UI_MOD_SHIFT; marks_touch(ui, &ui->pl, pl_mark, m->ntracks, to, &m->sel); ui->mods = keep; lv_reveal(&R_PLLIST, &ui->pl, m->ntracks, m->sel); mark_kind(ui, K_PLAYLIST); } }
+        { int to = m->sel; if (nav(key, &to, m->ntracks, lv_rows(&ui->L.pllist))) { int keep = ui->mods; ui->mods &= UI_MOD_SHIFT; marks_touch(ui, &ui->pl, pl_mark, m->ntracks, to, &m->sel); ui->mods = keep; lv_reveal(&ui->L.pllist, &ui->pl, m->ntracks, m->sel); mark_kind(ui, K_PLAYLIST); } }
     } else if (m->page == EA_PAGE_SOURCES && m->src_nitems > 0) {
         if (key == UI_KEY_ENTER) { if (m->src_sel >= 0 && ui->act.src_open) ui->act.src_open(ui->act.ctx, m->src_sel); return; }
         if (key == UI_KEY_SELECT_ALL) { marks_set(ui, lib_mark, m->src_nitems, 0, m->src_nitems - 1, 1); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_SRCSTATUS); return; }
-        { int to = m->src_sel; if (nav(key, &to, m->src_nitems, lv_rows(&R_LIBLIST))) { int keep = ui->mods; ui->mods &= UI_MOD_SHIFT; marks_touch(ui, &ui->lib, lib_mark, m->src_nitems, to, &m->src_sel); ui->mods = keep; lv_reveal(&R_LIBLIST, &ui->lib, m->src_nitems, m->src_sel); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_SRCSTATUS); } }
+        { int to = m->src_sel; if (nav(key, &to, m->src_nitems, lv_rows(&ui->L.liblist))) { int keep = ui->mods; ui->mods &= UI_MOD_SHIFT; marks_touch(ui, &ui->lib, lib_mark, m->src_nitems, to, &m->src_sel); ui->mods = keep; lv_reveal(&ui->L.liblist, &ui->lib, m->src_nitems, m->src_sel); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_SRCSTATUS); } }
     }
 }
 
