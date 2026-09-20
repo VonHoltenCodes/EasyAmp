@@ -140,6 +140,22 @@ int main(int argc, char **argv)
     shot(ui, dir, "equalizer-24");
     ui_set_page(ui, EA_PAGE_SOURCES);
     shot(ui, dir, "sources");
+    m.link_open = 1; strcpy(m.link_code, "B62Y"); strcpy(m.link_status, "WAITING FOR APPROVAL...");
+    ui_model_changed(ui, UI_CH_SOURCES);
+    ui_mouse_move(ui, 360, 350);
+    shot(ui, dir, "sources-link");
+    {
+        static ea_srcitem lib[60];
+        static const char *names[] = { "AC/DC", "Aerosmith", "Alice in Chains", "The Beatles", "Beyonce", "Black Sabbath", "Blondie",
+            "Bob Dylan", "Creedence Clearwater Revival", "David Bowie", "Deep Purple", "Dire Straits", "The Doors", "Eagles" };
+        m.link_open = 0; m.src_state = EA_SRC_OK; strcpy(m.src_name, "Plex  Starbase1");
+        strcpy(m.src_crumb, "STARBASE1 > MUSIC"); strcpy(m.src_status, "60 ARTISTS");
+        for (i = 0; i < 60; i++) { sprintf(lib[i].name, "%s%s", names[i % 14], i >= 14 ? " (more)" : ""); lib[i].container = 1; }
+        m.src_items = lib; m.src_nitems = 60; m.src_sel = 1;
+        ui_model_changed(ui, UI_CH_SOURCES);
+        shot(ui, dir, "sources-browse");
+        shot_indexed(ui, dir, "sources-browse-256", EA_PAL256, EA_LUT256, 20);
+    }
     ui_destroy(ui);
     return 0;
 }

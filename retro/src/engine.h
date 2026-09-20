@@ -11,7 +11,9 @@ typedef struct ea_engine ea_engine;
 
 ea_engine *eng_create(void);
 void eng_destroy(ea_engine *e);
-void eng_open(ea_engine *e, const char *path);   /* stops, opens, starts playing */
+/* stops, opens, starts playing. path is a file or an http:// URL; dur_hint_ms
+ * is used when the stream cannot tell its own length (a live transcode). */
+void eng_open(ea_engine *e, const char *path, int dur_hint_ms);
 void eng_pause(ea_engine *e, int paused);
 void eng_stop(ea_engine *e);
 void eng_seek(ea_engine *e, float fraction);

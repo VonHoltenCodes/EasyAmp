@@ -58,6 +58,16 @@ static const ea_rect R_BANK    = {   3, 148, 724, 206 };
 static const ea_rect R_LOWER   = {   3, 356, 724, 195 };
 static const ea_rect R_LEDMTR  = {  10, 363, 710,  44 };
 
+/* sources page */
+static const ea_rect R_SRCBAR   = {   3,  32, 238,  24 };
+static const ea_rect R_SRCACCT  = {   3,  56, 238, 455 };
+static const ea_rect R_SRCBTNS  = {   3, 513, 238,  38 };
+static const ea_rect R_LIBBAR   = { 244,  32, 483,  24 };
+static const ea_rect R_CRUMB    = { 244,  56, 483,  20 };
+static const ea_rect R_LIBLIST  = { 244,  76, 483, 435 };
+static const ea_rect R_LIBBTNS  = { 244, 513, 483,  38 };
+static const ea_rect R_LINKDLG  = { 215, 190, 300, 190 };
+
 #define PL_ROW_H   18
 #define SMALL_CURVE_H 30
 #define SMALL_LABEL_H 14
@@ -67,7 +77,8 @@ static const ea_rect R_LEDMTR  = {  10, 363, 710,  44 };
 /* ---- widgets --------------------------------------------------------------- */
 enum { K_XPORT, K_LEDBTN, K_TOGGLE, K_BUTTON, K_MENUBTN, K_STACKBTN, K_WINBTN, K_TAB,
        K_FOOTSTAT, K_STATUS, K_INFO, K_SCOPE, K_SEEK, K_VIZ, K_EQSMALL, K_PLAYLIST,
-       K_EQTIME, K_LOGSPEC, K_WAVE, K_BANK, K_LEDMETER, K_KNOB };
+       K_EQTIME, K_LOGSPEC, K_WAVE, K_BANK, K_LEDMETER, K_KNOB,
+       K_SRCACCT, K_LIBLIST, K_CRUMB, K_SRCSTATUS };
 
 enum { IC_EJECT, IC_PREV, IC_PLAY, IC_PAUSE, IC_STOP, IC_NEXT, IC_MIN, IC_CLOSE };
 
@@ -87,7 +98,9 @@ typedef struct {
     float vmin, vmax, vstep, vdef; /* knobs */
 } widget;
 
-#define MAX_WIDGETS 80
+typedef struct { int scroll, thumb_drag, thumb_off; } lview;
+
+#define MAX_WIDGETS 96
 #define MAX_MENU 12
 
 struct ea_ui {
@@ -99,8 +112,8 @@ struct ea_ui {
     int nw, capture, hover;
     int press_x, press_y;
     float press_v;
-    /* playlist view */
-    int pl_scroll, pl_thumb_drag, pl_thumb_off;
+    /* list views: the playlist and the library browser */
+    lview pl, lib;
     /* marquee */
     int mq_pos, mq_acc;
     /* viz peak holds */
@@ -108,6 +121,7 @@ struct ea_ui {
     /* overlay menu */
     struct { int open, owner, n, hover; ea_rect r; const char *items[MAX_MENU]; } menu;
     int show_eq, show_pl;
+    int dlg_was_open, dlg_hover, dlg_down;
 };
 
 /* ======================================================================== */
@@ -341,10 +355,14 @@ static void chrome_eq(ea_ui *ui)
 static void chrome_sources(ea_ui *ui)
 {
     ea_surface *s = &ui->bg;
-    ea_rect bar = { 3, 32, 724, 24 }, body = { 3, 56, 724, 495 }, msg = { 3, 270, 724, 20 };
-    title_bar(s, &bar, "EASYAMP SOURCES", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
-    well(s, &body, C_PLAYLIST, C_WELL_EDGE, 12, 230);
-    text_center(s, &EA_FONT_LCD, &msg, "PLEX + JELLYFIN - COMING TO THIS BUILD", C_IND_OFF, 1, 0);
+    title_bar(s, &R_SRCBAR, "EASYAMP SOURCES", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
+    well(s, &R_SRCACCT, C_PLAYLIST, C_WELL_EDGE, 12, 230);
+    metal_panel(s, &R_SRCBTNS);
+    title_bar(s, &R_LIBBAR, "LIBRARY", &EA_FONT_PANEL, C_PANELLBL, 2, 0);
+    gfx_fill(s, R_CRUMB.x, R_CRUMB.y, R_CRUMB.w, R_CRUMB.h, EA_RGB(0x05, 0x08, 0x07));
+    gfx_fill(s, R_CRUMB.x, R_CRUMB.y + R_CRUMB.h - 1, R_CRUMB.w, 1, C_BAR_LO);
+    well(s, &R_LIBLIST, C_PLAYLIST, C_WELL_EDGE, 12, 230);
+    metal_panel(s, &R_LIBBTNS);
 }
 
 static void build_bg(ea_ui *ui)
@@ -725,42 +743,193 @@ static void draw_eqsmall(ea_ui *ui, widget *w)
 
 /* ---- playlist ---------------------------------------------------------------------- */
 
-static int pl_rows(void) { return (R_PLLIST.h - 4) / PL_ROW_H; }
+static int lv_rows(const ea_rect *r) { return (r->h - 4) / PL_ROW_H; }
 
-static void pl_thumb(ea_ui *ui, ea_rect *out)
+static void lv_thumb(const ea_rect *r, const lview *v, int n, ea_rect *out)
 {
-    int rows = pl_rows(), n = ui->m->ntracks, track_h = R_PLLIST.h - 4, th, range;
-    out->x = R_PLLIST.x + R_PLLIST.w - 9; out->w = 7; out->y = R_PLLIST.y + 2; out->h = 0;
+    int rows = lv_rows(r), track_h = r->h - 4, th;
+    out->x = r->x + r->w - 9; out->w = 7; out->y = r->y + 2; out->h = 0;
     if (n <= rows) return;
     th = track_h * rows / n;
     if (th < 18) th = 18;
-    range = n - rows;
     out->h = th;
-    out->y += (track_h - th) * ui->pl_scroll / range;
+    out->y += (track_h - th) * v->scroll / (n - rows);
+}
+
+static void lv_clamp(const ea_rect *r, lview *v, int n)
+{
+    int maxs = n - lv_rows(r);
+    if (v->scroll > maxs) v->scroll = maxs;
+    if (v->scroll < 0) v->scroll = 0;
+}
+
+static void lv_reveal(const ea_rect *r, lview *v, int n, int sel)
+{
+    if (sel < 0) return;
+    if (sel < v->scroll) v->scroll = sel;
+    if (sel >= v->scroll + lv_rows(r)) v->scroll = sel - lv_rows(r) + 1;
+    lv_clamp(r, v, n);
+}
+
+static int lv_index_at(const ea_rect *r, const lview *v, int n, int y)
+{
+    int idx = v->scroll + (y - r->y - 2) / PL_ROW_H;
+    return idx >= 0 && idx < n && y >= r->y + 2 ? idx : -1;
+}
+
+typedef void (*lv_text_fn)(ea_ui *ui, int idx, char *out, int cap);
+
+static void lv_draw(ea_ui *ui, const ea_rect *r, lview *v, int n, int sel, int cur, lv_text_fn text)
+{
+    ea_surface *s = &ui->fb;
+    int rows = lv_rows(r), i, scroll = n > rows;
+    ea_rect th;
+    lv_clamp(r, v, n);
+    gfx_clip(s, r->x + 1, r->y + 1, r->w - 2 - (scroll ? 9 : 0), r->h - 2);
+    for (i = 0; i < rows && v->scroll + i < n; i++) {
+        int idx = v->scroll + i, y = r->y + 2 + i * PL_ROW_H, issel = idx == sel;
+        char line[220];
+        if (issel) gfx_fill(s, r->x + 1, y, r->w - 2, PL_ROW_H, C_SELECT);
+        text(ui, idx, line, (int)sizeof line);
+        gfx_text(s, &EA_FONT_TRACK, r->x + 6, y + 13, line, (issel || idx == cur) ? C_WHITE : C_LCD, 0, GFX_GLOW,
+                 issel ? EA_RGB(150, 180, 255) : C_LCD);
+    }
+    gfx_unclip(s);
+    if (scroll) {
+        gfx_fill(s, r->x + r->w - 10, r->y + 1, 9, r->h - 2, EA_RGB(0x06, 0x06, 0x0a));
+        lv_thumb(r, v, n, &th);
+        gfx_fill(s, th.x, th.y, th.w, th.h, EA_RGB(0x44, 0x44, 0x4e));
+        gfx_frame(s, th.x, th.y, th.w, th.h, EA_RGB(0x76, 0x76, 0x8a), EA_RGB(0x05, 0x05, 0x08));
+    }
+}
+
+/* press inside a list: returns the row hit, or -1 when the scrollbar took it */
+static int lv_press(const ea_rect *r, lview *v, int n, int x, int y)
+{
+    ea_rect th;
+    lv_thumb(r, v, n, &th);
+    v->thumb_drag = 0;
+    if (th.h && x >= th.x - 2) {
+        if (y >= th.y && y < th.y + th.h) { v->thumb_drag = 1; v->thumb_off = y - th.y; }
+        else { v->scroll += y < th.y ? -lv_rows(r) : lv_rows(r); lv_clamp(r, v, n); }
+        return -2;
+    }
+    return lv_index_at(r, v, n, y);
+}
+
+static void lv_drag(const ea_rect *r, lview *v, int n, int y)
+{
+    ea_rect th;
+    int travel;
+    if (!v->thumb_drag) return;
+    lv_thumb(r, v, n, &th);
+    travel = r->h - 4 - th.h;
+    if (travel > 0) v->scroll = (y - v->thumb_off - (r->y + 2)) * (n - lv_rows(r)) / travel;
+    lv_clamp(r, v, n);
+}
+
+static void pl_text(ea_ui *ui, int idx, char *out, int cap)
+{
+    (void)cap;
+    sprintf(out, "%d. %.180s", idx + 1, ui->m->tracks[idx].title);
 }
 
 static void draw_playlist(ea_ui *ui, widget *w)
 {
+    lv_draw(ui, &w->r, &ui->pl, ui->m->ntracks, ui->m->sel, ui->m->cur, pl_text);
+}
+
+/* ---- sources page ------------------------------------------------------------------- */
+
+static void lib_text(ea_ui *ui, int idx, char *out, int cap)
+{
+    (void)cap;
+    sprintf(out, "%.190s%s", ui->m->src_items[idx].name, ui->m->src_items[idx].container ? "  >" : "");
+}
+
+static void draw_liblist(ea_ui *ui, widget *w)
+{
+    ea_model *m = ui->m;
+    if (m->src_nitems > 0 && m->src_items) { lv_draw(ui, &w->r, &ui->lib, m->src_nitems, m->src_sel, -1, lib_text); return; }
+    {
+        ea_rect msg = w->r;
+        const char *t = m->src_busy ? "LOADING..." : m->src_state == EA_SRC_NONE ? "LINK A PLEX ACCOUNT TO BROWSE YOUR MUSIC" :
+                        m->src_state == EA_SRC_UNREACHABLE ? "SERVER NOT REACHABLE" : "NOTHING HERE";
+        msg.h = 60; msg.y = w->r.y + w->r.h / 2 - 30;
+        text_center(&ui->fb, &EA_FONT_IND, &msg, t, C_IND_OFF, 1, 0);
+    }
+}
+
+static void draw_srcacct(ea_ui *ui, widget *w)
+{
     ea_surface *s = &ui->fb;
     ea_model *m = ui->m;
-    int rows = pl_rows(), i, scroll = m->ntracks > rows;
-    ea_rect th;
-    gfx_clip(s, w->r.x + 1, w->r.y + 1, w->r.w - 2 - (scroll ? 9 : 0), w->r.h - 2);
-    for (i = 0; i < rows && ui->pl_scroll + i < m->ntracks; i++) {
-        int idx = ui->pl_scroll + i, y = w->r.y + 2 + i * PL_ROW_H, sel = idx == m->sel;
-        char line[200];
-        ea_px c = (sel || idx == m->cur) ? C_WHITE : C_LCD;
-        if (sel) gfx_fill(s, w->r.x + 1, y, w->r.w - 2, PL_ROW_H, C_SELECT);
-        sprintf(line, "%d. %.180s", idx + 1, m->tracks[idx].title);
-        gfx_text(s, &EA_FONT_TRACK, w->r.x + 6, y + 13, line, c, 0, GFX_GLOW, sel ? EA_RGB(150, 180, 255) : C_LCD);
+    int y = w->r.y + 2;
+    ea_px ledc;
+    if (m->src_state == EA_SRC_NONE) {
+        ea_rect msg = w->r;
+        msg.h = 40; msg.y = w->r.y + 20;
+        text_center(s, &EA_FONT_IND, &msg, "NO SOURCES YET", C_IND_OFF, 1, 0);
+        msg.y += 16;
+        text_center(s, &EA_FONT_IND, &msg, "PRESS +PLEX TO LINK", C_IND_OFF, 1, 0);
+        return;
     }
+    gfx_fill(s, w->r.x + 1, y, w->r.w - 2, PL_ROW_H, C_SELECT);
+    ledc = m->src_state == EA_SRC_OK ? C_LCD_ON : EA_RGB(0xff, 0x3b, 0x2b);
+    gfx_glow_rect(s, w->r.x + 7, y + 5, 8, 8, 5, ledc, 200);
+    gfx_fill(s, w->r.x + 6, y + 4, 10, 10, ledc);
+    gfx_frame(s, w->r.x + 6, y + 4, 10, 10, EA_RGB(0x0a, 0x0a, 0x04), EA_RGB(0x3c, 0x3c, 0x1c));
+    gfx_clip(s, w->r.x + 1, w->r.y + 1, w->r.w - 2, w->r.h - 2);
+    gfx_text(s, &EA_FONT_TRACK, w->r.x + 22, y + 13, m->src_name, C_WHITE, 0, GFX_GLOW, EA_RGB(150, 180, 255));
     gfx_unclip(s);
-    if (scroll) {
-        gfx_fill(s, w->r.x + w->r.w - 10, w->r.y + 1, 9, w->r.h - 2, EA_RGB(0x06, 0x06, 0x0a));
-        pl_thumb(ui, &th);
-        gfx_fill(s, th.x, th.y, th.w, th.h, EA_RGB(0x44, 0x44, 0x4e));
-        gfx_frame(s, th.x, th.y, th.w, th.h, EA_RGB(0x76, 0x76, 0x8a), EA_RGB(0x05, 0x05, 0x08));
-    }
+}
+
+static void draw_crumb(ea_ui *ui, widget *w)
+{
+    ea_surface *s = &ui->fb;
+    gfx_clip(s, w->r.x, w->r.y, w->r.w, w->r.h);
+    gfx_text(s, &EA_FONT_IND, w->r.x + 6, text_base(&EA_FONT_IND, w->r.y, w->r.h), ui->m->src_crumb, C_LCD_ON, 1, 0, 0);
+    gfx_unclip(s);
+}
+
+static void draw_srcstatus(ea_ui *ui, widget *w)
+{
+    ea_surface *s = &ui->fb;
+    gfx_clip(s, w->r.x, w->r.y, w->r.w, w->r.h);
+    gfx_text(s, &EA_FONT_IND, w->r.x, text_base(&EA_FONT_IND, w->r.y, w->r.h), ui->m->src_status, C_LCD_ON, 1,
+             ui->m->src_busy ? GFX_GLOW : 0, C_LCD_ON);
+    gfx_unclip(s);
+}
+
+/* the link dialog: the code goes to a PHONE, this PC cannot open plex.tv */
+static const ea_rect R_LINKCANCEL = { 275, 336, 180, 28 };
+
+static void draw_linkdlg(ea_ui *ui, int cancel_hover, int cancel_down)
+{
+    ea_surface *s = &ui->fb;
+    const ea_rect *r = &R_LINKDLG;
+    ea_rect line = *r, btn = R_LINKCANCEL;
+    int cw, base;
+    gfx_fill_a(s, 0, 0, EA_WIN_W, EA_WIN_H, C_BLACK, 120);                       /* dim the page behind */
+    gfx_fill_a(s, r->x + 4, r->y + 4, r->w, r->h, C_BLACK, 130);
+    gfx_fill(s, r->x, r->y, r->w, r->h, EA_RGB(0x23, 0x2b, 0x4a));
+    gfx_scanlines(s, r->x, r->y, r->w, r->h, 8, 6, 26);
+    gfx_frame(s, r->x, r->y, r->w, r->h, C_BAR_HI, C_BAR_LO);
+    line.h = 16; line.y = r->y + 14;
+    text_center(s, &EA_FONT_TRACK, &line, "On your phone, open", EA_RGB(0xb8, 0xc0, 0xd4), 0, 0);
+    line.y += 18;
+    text_center(s, &EA_FONT_LCD, &line, "plex.tv/link", C_WHITE, 1, 0);
+    line.y += 18;
+    text_center(s, &EA_FONT_TRACK, &line, "and enter this code:", EA_RGB(0xb8, 0xc0, 0xd4), 0, 0);
+    cw = gfx_text_w(&EA_FONT_LINK, ui->m->link_code[0] ? ui->m->link_code : "----", 8) - 8;
+    gfx_text(s, &EA_FONT_LINK, r->x + (r->w - cw) / 2, r->y + 106, ui->m->link_code[0] ? ui->m->link_code : "----",
+             C_LCD_ON, 8, GFX_GLOW, C_LCD_ON);
+    line.y = r->y + 120;
+    text_center(s, &EA_FONT_IND, &line, ui->m->link_status, C_LCD_ON, 1, 0);
+    button_face(s, &btn, cancel_hover, cancel_down);
+    cw = gfx_text_w(&EA_FONT_BTN, "CANCEL", 1) - 1;
+    base = text_base(&EA_FONT_BTN, btn.y, btn.h) + (cancel_down ? 1 : 0);
+    button_text(s, &EA_FONT_BTN, btn.x + (btn.w - cw) / 2 + (cancel_down ? 1 : 0), base, "CANCEL", C_BTN_INK, 1);
 }
 
 /* ---- equalizer page -------------------------------------------------------------------- */
@@ -990,7 +1159,7 @@ static void add_knob(ea_ui *ui, int i, int id, float lo, float hi, float step, f
 static void build_widgets(ea_ui *ui)
 {
     static const int xcmd[5] = { EA_CMD_EJECT, EA_CMD_PREV, EA_CMD_PLAYPAUSE, EA_CMD_STOP, EA_CMD_NEXT };
-    int i, P = PG(EA_PAGE_PLAYER), E = PG(EA_PAGE_EQ);
+    int i, P = PG(EA_PAGE_PLAYER), E = PG(EA_PAGE_EQ), S = PG(EA_PAGE_SOURCES);
     /* window */
     add(ui, K_WINBTN, PG_ALL, 683, 7, 19, 18, 0, 0, EA_CMD_WIN_MINIMIZE);
     add(ui, K_WINBTN, PG_ALL, 704, 7, 19, 18, 0, 0, EA_CMD_WIN_CLOSE);
@@ -1038,6 +1207,17 @@ static void build_widgets(ea_ui *ui)
     add(ui, K_BUTTON, E, 317, 510, 66, 28, "IMPORT", ID_IMPORT, EA_CMD_EQ_IMPORT);
     add(ui, K_MENUBTN, E, 387, 510, 80, 28, "EXPORT", ID_EXPORT, 0);
     add(ui, K_BUTTON, E, 477, 510, 58, 28, "RESET", ID_RESET, 0);
+    /* sources */
+    add(ui, K_SRCACCT, S, R_SRCACCT.x, R_SRCACCT.y, R_SRCACCT.w, R_SRCACCT.h, 0, 0, 0);
+    add(ui, K_BUTTON, S, 9, 517, 62, 30, "+PLEX", 0, EA_CMD_SRC_LINK);
+    add(ui, K_BUTTON, S, 74, 517, 98, 30, "+JELLYFIN", 0, EA_CMD_SRC_JELLYFIN);
+    add(ui, K_BUTTON, S, 175, 517, 52, 30, "REM", 0, EA_CMD_SRC_REMOVE);
+    add(ui, K_CRUMB, S, R_CRUMB.x, R_CRUMB.y, R_CRUMB.w, R_CRUMB.h - 1, 0, 0, 0);
+    add(ui, K_LIBLIST, S, R_LIBLIST.x, R_LIBLIST.y, R_LIBLIST.w, R_LIBLIST.h, 0, 0, 0);
+    add(ui, K_BUTTON, S, 250, 517, 58, 30, "BACK", 0, EA_CMD_SRC_BACK);
+    add(ui, K_BUTTON, S, 311, 517, 58, 30, "PLAY", 0, EA_CMD_SRC_PLAY);
+    add(ui, K_BUTTON, S, 372, 517, 52, 30, "ADD", 0, EA_CMD_SRC_ADD);
+    add(ui, K_SRCSTATUS, S, 434, 517, 288, 30, 0, 0, 0);
 }
 
 static int on_page(ea_ui *ui, const widget *w) { return (w->pages & PG(ui->m->page)) != 0; }
@@ -1071,6 +1251,10 @@ static void draw_widget(ea_ui *ui, widget *w)
     case K_BANK:     draw_bank(ui, w); break;
     case K_LEDMETER: draw_ledmeter(ui, w); break;
     case K_KNOB:     draw_knob(ui, w); break;
+    case K_SRCACCT:  draw_srcacct(ui, w); break;
+    case K_LIBLIST:  draw_liblist(ui, w); break;
+    case K_CRUMB:    draw_crumb(ui, w); break;
+    case K_SRCSTATUS: draw_srcstatus(ui, w); break;
     }
 }
 
@@ -1117,6 +1301,8 @@ static void close_menu(ea_ui *ui)
     for (i = 0; i < ui->nw; i++) ui->w[i].dirty = 1;
 }
 
+void ui_list_reset(ea_ui *ui) { ui->lib.scroll = 0; mark_kind(ui, K_LIBLIST); }
+
 void ui_set_page(ea_ui *ui, int page)
 {
     if (page < 0 || page >= EA_PAGE_COUNT) return;
@@ -1143,6 +1329,8 @@ void ui_model_changed(ea_ui *ui, int what)
         mark_kind(ui, K_LEDMETER);
     }
     if (what & UI_CH_FOOTER)    mark_kind(ui, K_FOOTSTAT);
+    if (what & UI_CH_SOURCES)   { mark_kind(ui, K_SRCACCT); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_CRUMB);
+                                  mark_kind(ui, K_SRCSTATUS); if (ui->m->link_open || ui->dlg_was_open) ui->full_dirty = 1; }
 }
 
 void ui_tick(ea_ui *ui, int elapsed_ms)
@@ -1161,8 +1349,11 @@ static int intersects(const ea_rect *a, const ea_rect *b)
 
 int ui_render(ea_ui *ui, ea_rect *dirty, int max)
 {
-    int i, n = 0, menu_hit = 0;
+    int i, n = 0, menu_hit = 0, dlg = ui->m->link_open && ui->m->page == EA_PAGE_SOURCES;
     if (ui->bg_page != ui->m->page) { build_bg(ui); ui->full_dirty = 1; }
+    /* a modal dialog dims the whole page, so while it is up every change is a full repaint */
+    if (dlg || ui->dlg_was_open != dlg) { for (i = 0; i < ui->nw; i++) if (ui->w[i].dirty) ui->full_dirty = 1; }
+    if (ui->dlg_was_open != dlg) { ui->full_dirty = 1; ui->dlg_was_open = dlg; }
     if (ui->full_dirty) {
         gfx_blit(&ui->fb, 0, 0, &ui->bg, 0, 0, EA_WIN_W, EA_WIN_H);
         for (i = 0; i < ui->nw; i++) ui->w[i].dirty = 1;
@@ -1176,7 +1367,8 @@ int ui_render(ea_ui *ui, ea_rect *dirty, int max)
         /* a glow can spill a few pixels outside the widget: restore a margin */
         r.x = w->r.x - 6; r.y = w->r.y - 6; r.w = w->r.w + 12; r.h = w->r.h + 12;
         if (w->kind == K_VIZ || w->kind == K_PLAYLIST || w->kind == K_EQSMALL || w->kind == K_BANK ||
-            w->kind == K_LOGSPEC || w->kind == K_WAVE || w->kind == K_LEDMETER || w->kind == K_SCOPE) r = w->r;
+            w->kind == K_LOGSPEC || w->kind == K_WAVE || w->kind == K_LEDMETER || w->kind == K_SCOPE ||
+            w->kind == K_SRCACCT || w->kind == K_LIBLIST || w->kind == K_CRUMB || w->kind == K_SRCSTATUS) r = w->r;
         if (!ui->full_dirty) {
             gfx_clip(&ui->fb, r.x, r.y, r.w, r.h);
             gfx_blit(&ui->fb, r.x < 0 ? 0 : r.x, r.y < 0 ? 0 : r.y, &ui->bg, r.x < 0 ? 0 : r.x, r.y < 0 ? 0 : r.y,
@@ -1195,6 +1387,7 @@ int ui_render(ea_ui *ui, ea_rect *dirty, int max)
         draw_menu(ui);
         if (!ui->full_dirty && n < max) { dirty[n] = ui->menu.r; dirty[n].w += 3; dirty[n].h += 3; n++; }
     }
+    if (ui->full_dirty && dlg) draw_linkdlg(ui, ui->dlg_hover, ui->dlg_down);
     if (ui->full_dirty) {
         ui->full_dirty = 0;
         if (max > 0) { dirty[0].x = dirty[0].y = 0; dirty[0].w = EA_WIN_W; dirty[0].h = EA_WIN_H; }
@@ -1220,7 +1413,7 @@ static int hit(ea_ui *ui, int x, int y)
 static int interactive(int kind)
 {
     return !(kind == K_STATUS || kind == K_INFO || kind == K_SCOPE || kind == K_EQTIME || kind == K_LOGSPEC ||
-             kind == K_WAVE || kind == K_LEDMETER);
+             kind == K_WAVE || kind == K_LEDMETER || kind == K_CRUMB || kind == K_SRCSTATUS);
 }
 
 static void command(ea_ui *ui, int cmd) { if (ui->act.command) ui->act.command(ui->act.ctx, cmd); }
@@ -1316,22 +1509,6 @@ static void bank_drag(ea_ui *ui, widget *w, int x, int y, int pressing)
     eq_changed(ui);
 }
 
-static void pl_clamp(ea_ui *ui)
-{
-    int maxs = ui->m->ntracks - pl_rows();
-    if (ui->pl_scroll > maxs) ui->pl_scroll = maxs;
-    if (ui->pl_scroll < 0) ui->pl_scroll = 0;
-}
-
-static void pl_reveal(ea_ui *ui)
-{
-    int s = ui->m->sel;
-    if (s < 0) return;
-    if (s < ui->pl_scroll) ui->pl_scroll = s;
-    if (s >= ui->pl_scroll + pl_rows()) ui->pl_scroll = s - pl_rows() + 1;
-    pl_clamp(ui);
-}
-
 static void set_hover(ea_ui *ui, int idx)
 {
     if (idx >= 0 && !interactive(ui->w[idx].kind)) idx = -1;
@@ -1341,8 +1518,15 @@ static void set_hover(ea_ui *ui, int idx)
     if (idx >= 0) { ui->w[idx].hover = 1; ui->w[idx].dirty = 1; }
 }
 
+static int dlg_active(ea_ui *ui) { return ui->m->link_open && ui->m->page == EA_PAGE_SOURCES; }
+
 void ui_mouse_move(ea_ui *ui, int x, int y)
 {
+    if (dlg_active(ui)) {
+        int h = inside(&R_LINKCANCEL, x, y);
+        if (h != ui->dlg_hover) { ui->dlg_hover = h; ui->full_dirty = 1; }
+        return;
+    }
     if (ui->menu.open) {
         int h = inside(&ui->menu.r, x, y) ? (y - ui->menu.r.y - 3) / MENU_ROW_H : -1;
         if (h >= ui->menu.n) h = -1;
@@ -1356,14 +1540,8 @@ void ui_mouse_move(ea_ui *ui, int x, int y)
         case K_EQSMALL: case K_BANK: bank_drag(ui, w, x, y, 0); break;
         case K_SEEK:    ui->press_v = (float)(x - w->r.x - 7) / (float)(w->r.w - 14);
                         ui->press_v = ui->press_v < 0 ? 0 : (ui->press_v > 1 ? 1 : ui->press_v); w->dirty = 1; break;
-        case K_PLAYLIST:
-            if (ui->pl_thumb_drag) {
-                ea_rect th; int range = ui->m->ntracks - pl_rows(), travel;
-                pl_thumb(ui, &th); travel = R_PLLIST.h - 4 - th.h;
-                if (travel > 0) ui->pl_scroll = (y - ui->pl_thumb_off - (R_PLLIST.y + 2)) * range / travel;
-                pl_clamp(ui); w->dirty = 1;
-            }
-            break;
+        case K_PLAYLIST: if (ui->pl.thumb_drag) { lv_drag(&w->r, &ui->pl, ui->m->ntracks, y); w->dirty = 1; } break;
+        case K_LIBLIST:  if (ui->lib.thumb_drag) { lv_drag(&w->r, &ui->lib, ui->m->src_nitems, y); w->dirty = 1; } break;
         default: { int in = inside(&w->r, x, y); if (in != w->down) { w->down = in; w->dirty = 1; } } break;
         }
         return;
@@ -1375,6 +1553,7 @@ void ui_mouse_down(ea_ui *ui, int x, int y)
 {
     int i;
     widget *w;
+    if (dlg_active(ui)) { if (inside(&R_LINKCANCEL, x, y)) { ui->dlg_down = 1; ui->full_dirty = 1; } return; }
     if (ui->menu.open) {
         int h = inside(&ui->menu.r, x, y) ? (y - ui->menu.r.y - 3) / MENU_ROW_H : -1;
         menu_pick(ui, h >= 0 && h < ui->menu.n ? h : -1);
@@ -1390,18 +1569,9 @@ void ui_mouse_down(ea_ui *ui, int x, int y)
     case K_EQSMALL: case K_BANK: bank_drag(ui, w, x, y, 1); break;
     case K_SEEK:    ui->press_v = (float)(x - w->r.x - 7) / (float)(w->r.w - 14);
                     ui->press_v = ui->press_v < 0 ? 0 : (ui->press_v > 1 ? 1 : ui->press_v); break;
-    case K_PLAYLIST: {
-        ea_rect th;
-        pl_thumb(ui, &th);
-        ui->pl_thumb_drag = 0;
-        if (th.h && x >= th.x - 2) {
-            if (y >= th.y && y < th.y + th.h) { ui->pl_thumb_drag = 1; ui->pl_thumb_off = y - th.y; }
-            else { ui->pl_scroll += y < th.y ? -pl_rows() : pl_rows(); pl_clamp(ui); }
-        } else {
-            int idx = ui->pl_scroll + (y - w->r.y - 2) / PL_ROW_H;
-            ui->m->sel = idx >= 0 && idx < ui->m->ntracks ? idx : -1;
-        }
-        break; }
+    case K_PLAYLIST: { int idx = lv_press(&w->r, &ui->pl, ui->m->ntracks, x, y); if (idx != -2) ui->m->sel = idx; break; }
+    case K_LIBLIST:  { int idx = lv_press(&w->r, &ui->lib, ui->m->src_nitems, x, y); if (idx != -2) ui->m->src_sel = idx; break; }
+    case K_SRCACCT:  if (ui->m->src_state != EA_SRC_NONE && y < w->r.y + 2 + PL_ROW_H && ui->act.src_open) ui->act.src_open(ui->act.ctx, -1); break;
     }
 }
 
@@ -1409,12 +1579,18 @@ void ui_mouse_up(ea_ui *ui, int x, int y)
 {
     widget *w;
     int in;
+    if (dlg_active(ui)) {
+        int fire = ui->dlg_down && inside(&R_LINKCANCEL, x, y);
+        ui->dlg_down = 0; ui->full_dirty = 1;
+        if (fire) command(ui, EA_CMD_SRC_LINK_CANCEL);
+        return;
+    }
     if (ui->capture < 0) return;
     w = &ui->w[ui->capture];
     in = inside(&w->r, x, y);
     ui->capture = -1;
     w->down = 0; w->dirty = 1;
-    ui->pl_thumb_drag = 0;
+    ui->pl.thumb_drag = ui->lib.thumb_drag = 0;
     if (w->kind == K_SEEK) { if (ui->act.seek) ui->act.seek(ui->act.ctx, ui->press_v); }
     else if (in) switch (w->kind) {
     case K_XPORT: case K_STACKBTN: case K_WINBTN: command(ui, w->arg); break;
@@ -1448,8 +1624,11 @@ void ui_mouse_dbl(ea_ui *ui, int x, int y)
     w = &ui->w[i];
     if (w->kind == K_KNOB) knob_set(ui, w, w->vdef);
     else if (w->kind == K_PLAYLIST) {
-        int idx = ui->pl_scroll + (y - w->r.y - 2) / PL_ROW_H;
-        if (idx >= 0 && idx < ui->m->ntracks && x < w->r.x + w->r.w - 10 && ui->act.play_index) ui->act.play_index(ui->act.ctx, idx);
+        int idx = lv_index_at(&w->r, &ui->pl, ui->m->ntracks, y);
+        if (idx >= 0 && x < w->r.x + w->r.w - 10 && ui->act.play_index) ui->act.play_index(ui->act.ctx, idx);
+    } else if (w->kind == K_LIBLIST) {
+        int idx = lv_index_at(&w->r, &ui->lib, ui->m->src_nitems, y);
+        if (idx >= 0 && x < w->r.x + w->r.w - 10 && ui->act.src_open) { ui->m->src_sel = idx; ui->act.src_open(ui->act.ctx, idx); }
     } else if (w->kind == K_BANK && ui->m->selband >= 0) { ui->m->gains[ui->m->selband] = 0; eq_changed(ui); }
     else ui_mouse_down(ui, x, y);
 }
@@ -1463,28 +1642,38 @@ void ui_wheel(ea_ui *ui, int x, int y, int notches)
     if (i < 0) return;
     w = &ui->w[i];
     if (w->kind == K_KNOB) knob_set(ui, w, knob_value(ui, w->id) + notches * w->vstep);
-    else if (w->kind == K_PLAYLIST) { ui->pl_scroll -= notches * 3; pl_clamp(ui); w->dirty = 1; }
+    else if (w->kind == K_PLAYLIST) { ui->pl.scroll -= notches * 3; lv_clamp(&w->r, &ui->pl, ui->m->ntracks); w->dirty = 1; }
+    else if (w->kind == K_LIBLIST) { ui->lib.scroll -= notches * 3; lv_clamp(&w->r, &ui->lib, ui->m->src_nitems); w->dirty = 1; }
+}
+
+/* move a list selection by key; returns 1 when the key was a navigation key */
+static int nav(int key, int *sel, int n, int rows)
+{
+    switch (key) {
+    case UI_KEY_UP:   *sel = *sel > 0 ? *sel - 1 : 0; return 1;
+    case UI_KEY_DOWN: *sel = *sel < n - 1 ? *sel + 1 : n - 1; return 1;
+    case UI_KEY_PGUP: *sel = *sel - rows > 0 ? *sel - rows : 0; return 1;
+    case UI_KEY_PGDN: *sel = *sel + rows < n ? *sel + rows : n - 1; return 1;
+    case UI_KEY_HOME: *sel = 0; return 1;
+    case UI_KEY_END:  *sel = n - 1; return 1;
+    }
+    return 0;
 }
 
 void ui_key(ea_ui *ui, int key)
 {
     ea_model *m = ui->m;
+    if (m->link_open && m->page == EA_PAGE_SOURCES) { if (key == UI_KEY_ESC) command(ui, EA_CMD_SRC_LINK_CANCEL); return; }
     if (key == UI_KEY_ESC) { close_menu(ui); return; }
     if (key == UI_KEY_SPACE) { command(ui, EA_CMD_PLAYPAUSE); return; }
-    if (m->page != EA_PAGE_PLAYER || m->ntracks == 0) return;
-    switch (key) {
-    case UI_KEY_UP:     m->sel = m->sel > 0 ? m->sel - 1 : 0; break;
-    case UI_KEY_DOWN:   m->sel = m->sel < m->ntracks - 1 ? m->sel + 1 : m->ntracks - 1; break;
-    case UI_KEY_PGUP:   m->sel = m->sel - pl_rows() > 0 ? m->sel - pl_rows() : 0; break;
-    case UI_KEY_PGDN:   m->sel = m->sel + pl_rows() < m->ntracks ? m->sel + pl_rows() : m->ntracks - 1; break;
-    case UI_KEY_HOME:   m->sel = 0; break;
-    case UI_KEY_END:    m->sel = m->ntracks - 1; break;
-    case UI_KEY_ENTER:  if (m->sel >= 0 && ui->act.play_index) ui->act.play_index(ui->act.ctx, m->sel); return;
-    case UI_KEY_DELETE: command(ui, EA_CMD_PL_REMOVE); return;
-    default: return;
+    if (m->page == EA_PAGE_PLAYER && m->ntracks > 0) {
+        if (key == UI_KEY_ENTER) { if (m->sel >= 0 && ui->act.play_index) ui->act.play_index(ui->act.ctx, m->sel); return; }
+        if (key == UI_KEY_DELETE) { command(ui, EA_CMD_PL_REMOVE); return; }
+        if (nav(key, &m->sel, m->ntracks, lv_rows(&R_PLLIST))) { lv_reveal(&R_PLLIST, &ui->pl, m->ntracks, m->sel); mark_kind(ui, K_PLAYLIST); }
+    } else if (m->page == EA_PAGE_SOURCES && m->src_nitems > 0) {
+        if (key == UI_KEY_ENTER) { if (m->src_sel >= 0 && ui->act.src_open) ui->act.src_open(ui->act.ctx, m->src_sel); return; }
+        if (nav(key, &m->src_sel, m->src_nitems, lv_rows(&R_LIBLIST))) { lv_reveal(&R_LIBLIST, &ui->lib, m->src_nitems, m->src_sel); mark_kind(ui, K_LIBLIST); }
     }
-    pl_reveal(ui);
-    mark_kind(ui, K_PLAYLIST);
 }
 
 int ui_is_caption(ea_ui *ui, int x, int y)

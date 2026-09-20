@@ -99,6 +99,8 @@ void ea_model_init(ea_model *m)
     int i;
     memset(m, 0, sizeof *m);
     m->cur = m->sel = -1;
+    m->src_sel = -1;
+    strcpy(m->src_crumb, "SELECT A SOURCE");
     m->eq_on = 1;
     m->nbands = EA_GRAPHIC_N;
     ea_band_freqs(m->nbands, m->freqs);

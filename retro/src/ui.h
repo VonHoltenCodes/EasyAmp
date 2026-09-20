@@ -23,6 +23,7 @@
 #define UI_CH_EQ        0x10
 #define UI_CH_VIZ       0x20
 #define UI_CH_FOOTER    0x40
+#define UI_CH_SOURCES   0x80
 #define UI_CH_ALL       0xff
 
 /* key codes the shell translates to */
@@ -36,6 +37,7 @@ void        ui_destroy(ea_ui *ui);
 ea_surface *ui_surface(ea_ui *ui);
 
 void ui_set_page(ea_ui *ui, int page);
+void ui_list_reset(ea_ui *ui);                        /* library browser entered a new level */
 void ui_model_changed(ea_ui *ui, int what);
 void ui_tick(ea_ui *ui, int elapsed_ms);             /* marquee, peak decay */
 int  ui_render(ea_ui *ui, ea_rect *dirty, int max);  /* returns rects written */

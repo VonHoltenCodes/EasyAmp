@@ -8,6 +8,7 @@
 
 #include "engine.h"
 #include "dsp.h"
+#include "net.h"
 
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_NO_SIMD                 /* the floor is a Pentium II: no SSE */
@@ -19,6 +20,64 @@
 #define INBUF       (32 * 1024)
 
 enum { REQ_NONE, REQ_OPEN, REQ_STOP, REQ_QUIT };
+
+/* where the bytes come from: a local file, or a plain-HTTP stream (a Plex
+ * server on the LAN). A seek on a stream is a new request with a Range. */
+typedef struct {
+    FILE *f;
+    ea_stream *hs;
+    char url[1024];
+    long pos, size;
+} reader;
+
+static void rd_close(reader *r)
+{
+    if (r->f) fclose(r->f);
+    if (r->hs) net_stream_close(r->hs);
+    r->f = 0; r->hs = 0;
+}
+
+static int rd_open(reader *r, const char *path)
+{
+    char err[128];
+    memset(r, 0, sizeof *r);
+    if (!strncmp(path, "http://", 7)) {
+        strncpy(r->url, path, sizeof r->url - 1);
+        r->hs = net_stream_open(path, 0, &r->size, err, (int)sizeof err);
+        return r->hs != 0;
+    }
+    r->f = fopen(path, "rb");
+    if (!r->f) return 0;
+    fseek(r->f, 0, SEEK_END); r->size = ftell(r->f); fseek(r->f, 0, SEEK_SET);
+    return 1;
+}
+
+static int rd_read(reader *r, void *buf, int n)
+{
+    int got = 0;
+    if (r->f) got = (int)fread(buf, 1, (size_t)n, r->f);
+    else if (r->hs)
+        while (got < n) {                                   /* a stream hands back short reads */
+            int k = net_stream_read(r->hs, (char *)buf + got, n - got);
+            if (k <= 0) break;
+            got += k;
+        }
+    r->pos += got;
+    return got;
+}
+
+static int rd_seek(reader *r, long pos)
+{
+    char err[128];
+    if (r->f) { r->pos = pos; return fseek(r->f, pos, SEEK_SET) == 0; }
+    if (pos == r->pos && r->hs) return 1;
+    if (r->hs) net_stream_close(r->hs);
+    r->hs = net_stream_open(r->url, pos, 0, err, (int)sizeof err);
+    r->pos = pos;
+    return r->hs != 0;
+}
+
+static int rd_is_open(const reader *r) { return r->f || r->hs; }
 enum { SRC_NONE, SRC_MP3, SRC_WAV };
 
 struct ea_engine {
@@ -27,7 +86,8 @@ struct ea_engine {
     /* requests (UI -> worker), under lock */
     int req, req_pause, have_seek, dsp_dirty;
     float seek_frac;
-    char req_path[MAX_PATH];
+    char req_path[1024];
+    int req_dur_hint;
     ea_model dsp_model;
     /* status (worker -> UI), under lock */
     int state, event, kbps, rate, channels, dur_ms, base_ms;
@@ -39,7 +99,7 @@ struct ea_engine {
     WAVEHDR hdr[NBUF];
     short *pcm[NBUF];
     int wo_rate, paused;
-    FILE *f;
+    reader rd;
     int src, eof;
     long data_start, data_len;
     mp3dec_t mp3;
@@ -62,8 +122,8 @@ static unsigned be32(const unsigned char *p) { return ((unsigned)p[0] << 24) | (
 
 static void src_close(ea_engine *e)
 {
-    if (e->f) fclose(e->f);
-    e->f = 0; e->src = SRC_NONE;
+    rd_close(&e->rd);
+    e->src = SRC_NONE;
 }
 
 static int refill(ea_engine *e)
@@ -71,7 +131,7 @@ static int refill(ea_engine *e)
     int keep = e->in_len - e->in_pos, got;
     if (keep > 0 && e->in_pos > 0) memmove(e->in, e->in + e->in_pos, (size_t)keep);
     e->in_pos = 0; e->in_len = keep > 0 ? keep : 0;
-    got = (int)fread(e->in + e->in_len, 1, (size_t)(INBUF - e->in_len), e->f);
+    got = rd_read(&e->rd, e->in + e->in_len, INBUF - e->in_len);
     e->in_len += got;
     return got;
 }
@@ -106,10 +166,10 @@ static int wav_more(ea_engine *e)
 {
     unsigned char raw[1152 * 4];
     int want = 1152 * e->wav_bytes_per_frame, got, n, i;
-    long left = e->data_start + e->data_len - ftell(e->f);
+    long left = e->data_start + e->data_len - e->rd.pos;
     if (left <= 0) return 0;
     if (want > left) want = (int)left;
-    got = (int)fread(raw, 1, (size_t)want, e->f);
+    got = rd_read(&e->rd, raw, want);
     n = got / e->wav_bytes_per_frame;
     for (i = 0; i < n; i++) {
         const unsigned char *p = raw + i * e->wav_bytes_per_frame;
@@ -131,12 +191,11 @@ static int open_wav(ea_engine *e, const unsigned char *h, long size)
     while (pos + 8 <= size) {
         unsigned char ck[8];
         unsigned len;
-        fseek(e->f, pos, SEEK_SET);
-        if (fread(ck, 1, 8, e->f) != 8) break;
+        if (!rd_seek(&e->rd, pos) || rd_read(&e->rd, ck, 8) != 8) break;
         len = ck[4] | (ck[5] << 8) | (ck[6] << 16) | ((unsigned)ck[7] << 24);
         if (!memcmp(ck, "fmt ", 4)) {
             unsigned char f[16];
-            if (fread(f, 1, 16, e->f) != 16) return 0;
+            if (rd_read(&e->rd, f, 16) != 16) return 0;
             if ((f[0] | (f[1] << 8)) != 1) return 0;               /* PCM only */
             e->channels = f[2] | (f[3] << 8);
             e->rate = f[4] | (f[5] << 8) | (f[6] << 16) | ((unsigned)f[7] << 24);
@@ -149,8 +208,7 @@ static int open_wav(ea_engine *e, const unsigned char *h, long size)
             e->wav_bytes_per_frame = e->channels * 2;
             e->dur_ms = (int)((double)e->data_len / e->wav_bytes_per_frame * 1000.0 / e->rate);
             e->kbps = e->rate * e->channels * 16 / 1000;
-            fseek(e->f, e->data_start, SEEK_SET);
-            return 1;
+            return rd_seek(&e->rd, e->data_start);
         }
         pos += 8 + len + (len & 1);
     }
@@ -165,10 +223,9 @@ static int src_open(ea_engine *e, const char *path)
     short tmp[MINIMP3_MAX_SAMPLES_PER_FRAME];
     int n = 0, tries = 0;
     src_close(e);
-    e->f = fopen(path, "rb");
-    if (!e->f) return 0;
-    fseek(e->f, 0, SEEK_END); size = ftell(e->f); fseek(e->f, 0, SEEK_SET);
-    if (fread(h, 1, 12, e->f) != 12) { src_close(e); return 0; }
+    if (!rd_open(&e->rd, path)) return 0;
+    size = e->rd.size;
+    if (rd_read(&e->rd, h, 12) != 12) { src_close(e); return 0; }
     e->eof = 0; e->stage_len = e->stage_pos = 0; e->in_len = e->in_pos = 0; e->rs_pos = 0;
     e->rs_last[0] = e->rs_last[1] = 0;
     if (!memcmp(h, "RIFF", 4) && !memcmp(h + 8, "WAVE", 4)) {
@@ -180,12 +237,11 @@ static int src_open(ea_engine *e, const char *path)
     e->data_start = 0;
     if (!memcmp(h, "ID3", 3)) e->data_start = 10 + (((long)h[6] & 127) << 21 | ((long)h[7] & 127) << 14 | ((long)h[8] & 127) << 7 | ((long)h[9] & 127));
     e->data_len = size - e->data_start;
-    if (size > 128) {                                   /* and ignore a trailing ID3v1 */
+    if (size > 128 && e->rd.f) {                        /* a trailing ID3v1; not worth a request on a stream */
         unsigned char t[3];
-        fseek(e->f, size - 128, SEEK_SET);
-        if (fread(t, 1, 3, e->f) == 3 && !memcmp(t, "TAG", 3)) e->data_len -= 128;
+        if (rd_seek(&e->rd, size - 128) && rd_read(&e->rd, t, 3) == 3 && !memcmp(t, "TAG", 3)) e->data_len -= 128;
     }
-    fseek(e->f, e->data_start, SEEK_SET);
+    if (!rd_seek(&e->rd, e->data_start)) { src_close(e); return 0; }
     mp3dec_init(&e->mp3);
     refill(e);
     /* first frame gives the format; a Xing/Info header gives an exact length */
@@ -211,7 +267,7 @@ static int src_open(ea_engine *e, const char *path)
         e->in_pos += info.frame_bytes;
     }
     if (!e->rate) { src_close(e); return 0; }
-    fseek(e->f, e->data_start, SEEK_SET);                /* start clean from the top */
+    if (!rd_seek(&e->rd, e->data_start)) { src_close(e); return 0; }   /* start clean from the top */
     mp3dec_init(&e->mp3);
     e->in_len = e->in_pos = 0;
     e->src = SRC_MP3;
@@ -222,9 +278,10 @@ static void src_seek(ea_engine *e, float frac)
 {
     long off = (long)((double)e->data_len * frac);
     if (e->src == SRC_WAV) off -= off % e->wav_bytes_per_frame;
-    fseek(e->f, e->data_start + off, SEEK_SET);
+    if (!rd_seek(&e->rd, e->data_start + off)) e->eof = 1;
     if (e->src == SRC_MP3) mp3dec_init(&e->mp3);         /* it resyncs on the next header */
-    e->in_len = e->in_pos = 0; e->stage_len = e->stage_pos = 0; e->eof = 0; e->rs_pos = 0;
+    e->in_len = e->in_pos = 0; e->stage_len = e->stage_pos = 0; e->rs_pos = 0;
+    if (rd_is_open(&e->rd)) e->eof = 0;
 }
 
 /* ---- output ---------------------------------------------------------------------- */
@@ -299,12 +356,13 @@ static DWORD WINAPI worker(LPVOID arg)
     for (;;) {
         int req, want_pause, seek, i, queued = 0, wrote = 0;
         float frac;
-        char path[MAX_PATH];
+        char path[1024];
+        int dur_hint;
         EnterCriticalSection(&e->lock);
         req = e->req; e->req = REQ_NONE;
         want_pause = e->req_pause;
         seek = e->have_seek; e->have_seek = 0; frac = e->seek_frac;
-        strcpy(path, e->req_path);
+        strcpy(path, e->req_path); dur_hint = e->req_dur_hint;
         if (e->dsp_dirty) {
             e->dsp_dirty = 0;
             chain_config(&e->chain, &e->dsp_model);
@@ -326,6 +384,7 @@ static DWORD WINAPI worker(LPVOID arg)
         if (req == REQ_OPEN) {
             int ok = src_open(e, path) && out_open(e, e->rate);
             EnterCriticalSection(&e->lock);
+            if (ok && dur_hint > 0 && (e->rd.size <= 0 || e->dur_ms <= 0)) e->dur_ms = dur_hint;
             if (ok) {
                 chain_init(&e->chain, e->rate); chain_config(&e->chain, &e->dsp_model);
                 e->state = EA_PLAYING; e->req_pause = 0;
@@ -333,7 +392,7 @@ static DWORD WINAPI worker(LPVOID arg)
             LeaveCriticalSection(&e->lock);
             want_pause = 0;
         }
-        if (e->src != SRC_NONE && seek) {
+        if (e->src != SRC_NONE && seek && e->data_len > 0) {
             waveOutReset(e->wo);
             for (i = 0; i < NBUF; i++) e->hdr[i].dwFlags |= WHDR_DONE;
             src_seek(e, frac);
@@ -424,10 +483,11 @@ void eng_destroy(ea_engine *e)
     free(e);
 }
 
-void eng_open(ea_engine *e, const char *path)
+void eng_open(ea_engine *e, const char *path, int dur_hint_ms)
 {
     EnterCriticalSection(&e->lock);
-    strncpy(e->req_path, path, MAX_PATH - 1);
+    strncpy(e->req_path, path, sizeof e->req_path - 1);
+    e->req_dur_hint = dur_hint_ms;
     e->req = REQ_OPEN; e->req_pause = 0; e->have_seek = 0; e->event = ENG_EV_NONE;
     LeaveCriticalSection(&e->lock);
     SetEvent(e->wake);
