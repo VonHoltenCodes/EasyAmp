@@ -22,6 +22,33 @@ preset roster, same playlist format, written from scratch in C.
 | Playback | `src/engine_win32.c` | Worker thread: minimp3 / PCM WAV → varispeed → DSP → `waveOut`. Meters are analysed at the position the card is actually playing. |
 | Shell | `src/main_win32.c` | Borderless window, file dialogs, drag and drop, ID3 titles, m3u. |
 
+## Plex
+
+![sources](docs/retro-sources.png)
+![link](docs/retro-plex-link.png)
+
+Linking is phone-first: the app shows a four-character code and the user
+enters it at plex.tv/link on another device, because these PCs cannot open
+plex.tv themselves. plex.tv requires TLS 1.2, which neither Windows 98 nor
+XP can speak, so those few calls go through BearSSL (fetched at build time,
+pinned; `make anchors` regenerates the trust anchors). Everything after
+that - browsing and streaming - is plain HTTP to the server on the LAN, so
+it costs the old CPU nothing. The server must allow that: Settings >
+Network > Secure connections = Preferred, not Required.
+
+MP3 tracks stream straight off the server with seeking. Anything else (AAC,
+FLAC, ...) is requested through the server's transcoder as MP3; those
+streams cannot seek. If Windows cannot resolve a name the client asks
+1.1.1.1 / 8.8.8.8 itself, because retro boxes often carry a DNS setting that
+died years ago. Names are folded from UTF-8 to the ASCII the fonts carry.
+
+The account token is saved in `EASYAMP.INI` beside the exe **in plain
+text**: Windows 98 has no protected store. Unlink with REM, or revoke the
+device in Plex > Settings > Authorized Devices.
+
+`tests/tlstest.c` (`make build/TLSTEST.EXE`) checks one machine: TLS 1.2 to
+plex.tv, which DNS path was used, whether the OS random generator answered.
+
 ## Colour depth
 
 Windows 98 boxes run anything from 16 colours to true colour, and left alone
@@ -69,10 +96,13 @@ m3u load + save / drag and drop), 10–32 band parametric EQ with presets,
 BASS / LOUD, balance, varispeed pitch, spectrum / VU / scope / LED meters,
 MP3 + WAV.
 
-Not yet: the SOURCES page (Plex / Jellyfin), APO import / export, saving
-settings between runs, FLAC / Ogg, and a run on real Windows 98 hardware.
+Plex: link, browse, stream, transcode (above).
+
+Not yet: Jellyfin (the button is there and says so - PRs welcome), APO
+import / export, saving the EQ and playlist between runs, local FLAC / Ogg.
 
 ## Third party
 
-`third_party/minimp3.h` — lieff/minimp3, CC0.
+`third_party/minimp3.h` — lieff/minimp3, CC0. `third_party/jsmn.h` — zserge/jsmn, MIT.
+BearSSL — Thomas Pornin, MIT, fetched by `tools/fetch-bearssl.sh`.
 Fonts: DSEG7 Classic and Pixelify Sans, SIL OFL (see `easyamp/fonts/`).

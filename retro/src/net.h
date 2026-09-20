@@ -20,6 +20,8 @@ void net_shutdown(void);
 int  net_request(const char *method, const char *url, const char *headers,
                  const char *body, ea_http *out, int timeout_ms);
 void net_free(ea_http *r);
+/* one line for diagnostics: how names resolved, whether the OS RNG answered */
+void net_diag(char *out, int cap);
 
 /* a byte stream over plain HTTP, for playback. Range-capable servers can seek. */
 typedef struct ea_stream ea_stream;

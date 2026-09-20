@@ -71,6 +71,17 @@ static int rd_seek(reader *r, long pos)
     char err[128];
     if (r->f) { r->pos = pos; return fseek(r->f, pos, SEEK_SET) == 0; }
     if (pos == r->pos && r->hs) return 1;
+    /* a short hop forward on a stream: read and drop the bytes. A new request
+     * would mean a new connection - and, for a transcode, a new transcoder
+     * session on the server - just to step over an ID3 tag. */
+    if (r->hs && pos > r->pos && pos - r->pos <= 512 * 1024) {
+        char skip[4096];
+        while (r->pos < pos) {
+            long want = pos - r->pos;
+            if (rd_read(r, skip, want > (long)sizeof skip ? (int)sizeof skip : (int)want) <= 0) return 0;
+        }
+        return 1;
+    }
     if (r->hs) net_stream_close(r->hs);
     r->hs = net_stream_open(r->url, pos, 0, err, (int)sizeof err);
     r->pos = pos;
@@ -236,7 +247,7 @@ static int src_open(ea_engine *e, const char *path)
     /* MP3: step over an ID3v2 tag (album art can be hundreds of KB of junk) */
     e->data_start = 0;
     if (!memcmp(h, "ID3", 3)) e->data_start = 10 + (((long)h[6] & 127) << 21 | ((long)h[7] & 127) << 14 | ((long)h[8] & 127) << 7 | ((long)h[9] & 127));
-    e->data_len = size - e->data_start;
+    e->data_len = size > e->data_start ? size - e->data_start : 0;
     if (size > 128 && e->rd.f) {                        /* a trailing ID3v1; not worth a request on a stream */
         unsigned char t[3];
         if (rd_seek(&e->rd, size - 128) && rd_read(&e->rd, t, 3) == 3 && !memcmp(t, "TAG", 3)) e->data_len -= 128;
@@ -252,7 +263,7 @@ static int src_open(ea_engine *e, const char *path)
             const unsigned char *fr = e->in + e->in_pos;
             int i;
             e->rate = info.hz; e->channels = info.channels; e->kbps = info.bitrate_kbps;
-            e->dur_ms = info.bitrate_kbps > 0 ? (int)((double)e->data_len * 8.0 / info.bitrate_kbps) : 0;
+            e->dur_ms = info.bitrate_kbps > 0 && e->data_len > 0 ? (int)((double)e->data_len * 8.0 / info.bitrate_kbps) : 0;   /* a live transcode has no length */
             for (i = 4; i + 12 < info.frame_bytes && i < 48; i++)
                 if (!memcmp(fr + i, "Xing", 4) || !memcmp(fr + i, "Info", 4)) {
                     if (fr[i + 7] & 1) {
@@ -267,9 +278,12 @@ static int src_open(ea_engine *e, const char *path)
         e->in_pos += info.frame_bytes;
     }
     if (!e->rate) { src_close(e); return 0; }
-    if (!rd_seek(&e->rd, e->data_start)) { src_close(e); return 0; }   /* start clean from the top */
     mp3dec_init(&e->mp3);
-    e->in_len = e->in_pos = 0;
+    if (e->rd.f) {                                       /* a file: start clean from the top */
+        if (!rd_seek(&e->rd, e->data_start)) { src_close(e); return 0; }
+        e->in_len = e->in_pos = 0;
+    }                                                    /* a stream: keep what is buffered, the probed
+                                                          * frame was not consumed and decodes again */
     e->src = SRC_MP3;
     return 1;
 }
@@ -548,7 +562,7 @@ int eng_poll(ea_engine *e, ea_model *m)
     m->dur_ms = e->dur_ms;
     m->pos_ms = state == EA_STOPPED ? 0 : e->base_ms + (rate ? (int)((double)played * 1000.0 * pitch / rate) : 0);
     LeaveCriticalSection(&e->lock);
-    if (m->dur_ms && m->pos_ms > m->dur_ms) m->pos_ms = m->dur_ms;
+    if (m->dur_ms > 0 && m->pos_ms > m->dur_ms) m->pos_ms = m->dur_ms;
     if (rate && rate != e->ana_rate) { ana_init(&e->ana, rate); e->ana_rate = rate; }
     if (have && e->ana_rate) ana_run(&e->ana, win, m); else ana_decay(&e->ana, m);
     return ev;

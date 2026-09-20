@@ -237,6 +237,7 @@ static plex_server g_srv;
 static int         g_linked;
 static plex_item  *g_lib;                       /* the level on screen */
 static int         g_nlib, g_depth;
+static int         g_script[8], g_script_n, g_script_pos;   /* /open:1,0,2 - rows to open as levels load (testing) */
 static char        g_nodes[MAX_DEPTH][64], g_names[MAX_DEPTH][128];
 
 static void ini_path(void)
@@ -460,6 +461,8 @@ static void plex_unlink(void)
 }
 
 /* called every frame: progress of, and results from, the running job */
+static void on_src_open(void *ctx, int idx);
+
 static void job_poll(void)
 {
     job_t *j = &g_job;
@@ -485,11 +488,25 @@ static void job_poll(void)
         _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->cancel ? "CANCELLED" : j->err);
         break;
     case JOB_RECONNECT:
-        if (j->ok) { g_srv = j->srv; plex_save(); g_m.src_state = EA_SRC_OK; strcpy(g_m.src_status, "READY"); }
+        if (j->ok) {                                     /* show the library straight away, not an empty page */
+            g_srv = j->srv; plex_save(); g_m.src_state = EA_SRC_OK;
+            j->kind = JOB_NONE; g_depth = 0; g_nodes[0][0] = 0; browse("");
+            ui_model_changed(g_ui, UI_CH_SOURCES);
+            return;
+        }
         else { g_m.src_state = EA_SRC_UNREACHABLE; _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err[0] ? j->err : "SERVER NOT REACHABLE"); }
         break;
     case JOB_BROWSE:
-        if (j->ok) { show_level(j->items, j->nitems); j->items = 0; }
+        if (j->ok) {
+            show_level(j->items, j->nitems); j->items = 0;
+            if (g_script_pos < g_script_n) {                     /* scripted descent, one row per loaded level */
+                int row = g_script[g_script_pos++];
+                j->kind = JOB_NONE; g_m.src_busy = 0; g_m.src_sel = row;
+                ui_model_changed(g_ui, UI_CH_SOURCES);
+                on_src_open(0, row);
+                return;
+            }
+        }
         else { if (g_depth > 0) g_depth--; _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err); }
         break;
     case JOB_COLLECT: {
@@ -832,6 +849,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         else if (!strncmp(a, "/depth:", 7)) g_force_depth = atoi(a + 7);      /* 32, 16, 15, 8, 4: try a colour path on any desktop */
         else if (!strncmp(a, "/preset:", 8)) { int p = atoi(a + 8); if (p >= 0 && p < ea_preset_count()) ea_preset_apply(&g_m, p); }
         else if (!strncmp(a, "/vu", 3)) g_m.viz_vu = 1;
+        else if (!strncmp(a, "/open:", 6)) { const char *q = a + 6; while (*q && g_script_n < 8) { g_script[g_script_n++] = atoi(q); q = strchr(q, ','); if (!q) break; q++; } }
         else { const char *dot = strrchr(a, '.'); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
     }
     eng_set_dsp(g_eng, &g_m);

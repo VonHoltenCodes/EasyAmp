@@ -24,6 +24,8 @@ typedef struct {                     /* one connection, plain or TLS */
 } conn_t;
 
 static int g_started;
+static char g_dns_how[48] = "not used";
+static int g_osrng = -1;                /* -1 untried, 0 refused, 1 answered */
 
 int net_init(void)
 {
@@ -83,9 +85,10 @@ static void gather_entropy(unsigned char out[32])
         ULONG_PTR prov = 0;
         if (acq && gen && rel && (acq(&prov, 0, 0, 1 /* PROV_RSA_FULL */, 0xF0000000u /* VERIFYCONTEXT */) ||
                                   acq(&prov, 0, 0, 1, 0) || acq(&prov, 0, 0, 1, 8 /* NEWKEYSET */))) {
-            if (gen(prov, sizeof os, os)) br_sha256_update(&h, os, sizeof os);
+            g_osrng = gen(prov, sizeof os, os) ? 1 : 0;
+            if (g_osrng) br_sha256_update(&h, os, sizeof os);
             rel(prov, 0);
-        }
+        } else g_osrng = 0;
         FreeLibrary(adv);
     }
     for (i = 0; i < 64; i++) {                 /* timer jitter: cheap, and present on every box */
@@ -100,6 +103,61 @@ static void gather_entropy(unsigned char out[32])
     v = GetCurrentThreadId(); br_sha256_update(&h, &v, sizeof v);
     br_sha256_update(&h, &h, sizeof(void *));
     br_sha256_out(&h, out);
+}
+
+void net_diag(char *out, int cap)
+{
+    _snprintf(out, (size_t)cap, "dns=%s osrng=%s", g_dns_how, g_osrng < 0 ? "untried" : g_osrng ? "yes" : "NO (timing entropy only)");
+    out[cap - 1] = 0;
+}
+
+/* ---- DNS fallback -----------------------------------------------------------------
+ * A retro box often carries a DNS setting that died years ago (a router that
+ * was replaced, a home server that was retired). When Windows cannot resolve
+ * a name, ask a public resolver directly: one A query over UDP. */
+static unsigned long dns_ask(const char *host, const char *server)
+{
+    unsigned char q[300], r[512];
+    struct sockaddr_in sa;
+    SOCKET s;
+    fd_set rf;
+    struct timeval tv;
+    const char *p = host;
+    int n = 12, len, i, qd, an;
+    unsigned long ip = 0;
+    memset(q, 0, sizeof q);
+    q[0] = 0xEA; q[1] = (unsigned char)(GetTickCount() & 255); q[2] = 1; q[5] = 1;      /* id, RD, one question */
+    while (*p) {
+        const char *dot = strchr(p, '.');
+        int l = dot ? (int)(dot - p) : (int)strlen(p);
+        if (l <= 0 || l > 63 || n + l + 6 > (int)sizeof q) return 0;
+        q[n++] = (unsigned char)l; memcpy(q + n, p, (size_t)l); n += l;
+        p += l + (dot ? 1 : 0);
+    }
+    q[n++] = 0; q[n++] = 0; q[n++] = 1; q[n++] = 0; q[n++] = 1;                        /* A, IN */
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s == INVALID_SOCKET) return 0;
+    memset(&sa, 0, sizeof sa);
+    sa.sin_family = AF_INET; sa.sin_port = htons(53); sa.sin_addr.s_addr = inet_addr(server);
+    sendto(s, (const char *)q, n, 0, (struct sockaddr *)&sa, sizeof sa);
+    FD_ZERO(&rf); FD_SET(s, &rf); tv.tv_sec = 2; tv.tv_usec = 500000;
+    len = select(0, &rf, 0, 0, &tv) > 0 ? recv(s, (char *)r, sizeof r, 0) : 0;
+    closesocket(s);
+    if (len < 12 || r[0] != q[0] || r[1] != q[1]) return 0;
+    qd = (r[4] << 8) | r[5]; an = (r[6] << 8) | r[7];
+    i = 12;
+    while (qd-- > 0 && i < len) { while (i < len && r[i] && (r[i] & 0xC0) != 0xC0) i += r[i] + 1; i += ((r[i] & 0xC0) == 0xC0 ? 2 : 1) + 4; }
+    while (an-- > 0 && i + 12 <= len) {
+        int type, rdlen;
+        while (i < len && r[i] && (r[i] & 0xC0) != 0xC0) i += r[i] + 1;
+        i += (r[i] & 0xC0) == 0xC0 ? 2 : 1;
+        if (i + 10 > len) break;
+        type = (r[i] << 8) | r[i + 1]; rdlen = (r[i + 8] << 8) | r[i + 9];
+        i += 10;
+        if (type == 1 && rdlen == 4 && i + 4 <= len) { memcpy(&ip, r + i, 4); break; }     /* first A record; CNAMEs are skipped over */
+        i += rdlen;
+    }
+    return ip;
 }
 
 /* ---- sockets ---------------------------------------------------------------------- */
@@ -129,9 +187,14 @@ static SOCKET tcp_connect(const char *host, int port, int timeout_ms, char *err,
     sa.sin_family = AF_INET; sa.sin_port = htons((u_short)port);
     sa.sin_addr.s_addr = inet_addr(host);
     if (sa.sin_addr.s_addr == INADDR_NONE) {
-        he = gethostbyname(host);
-        if (!he || !he->h_addr_list[0]) { _snprintf(err, (size_t)errcap, "cannot resolve %s", host); return INVALID_SOCKET; }
-        memcpy(&sa.sin_addr, he->h_addr_list[0], 4);
+        static const char *public_dns[2] = { "1.1.1.1", "8.8.8.8" };
+        unsigned long ip = 0;
+        int k;
+        he = getenv("EASYAMP_NODNS") ? 0 : gethostbyname(host);     /* the env var forces the fallback, for testing */
+        if (he && he->h_addr_list[0]) { memcpy(&ip, he->h_addr_list[0], 4); strcpy(g_dns_how, "windows"); }
+        for (k = 0; !ip && k < 2; k++) if ((ip = dns_ask(host, public_dns[k])) != 0) sprintf(g_dns_how, "fallback %s (Windows DNS failed)", public_dns[k]);
+        if (!ip) { strcpy(g_dns_how, "FAILED"); _snprintf(err, (size_t)errcap, "cannot resolve %s - no working DNS, or no internet", host); return INVALID_SOCKET; }
+        sa.sin_addr.s_addr = ip;
     }
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == INVALID_SOCKET) { _snprintf(err, (size_t)errcap, "no socket"); return s; }
@@ -211,7 +274,8 @@ static int send_request_v(conn_t *c, const url_t *u, const char *method, const c
                   "%s %s HTTP/%s\r\nHost: %s\r\nUser-Agent: EasyAmp-retro\r\nAccept: application/json\r\nConnection: close\r\n%s%s",
                   method, u->path, ver, u->host, headers ? headers : "", extra ? extra : "");
     if (n < 0 || n >= (int)sizeof req - 64) return -1;
-    if (body || !strcmp(method, "POST")) n += sprintf(req + n, "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n", blen);
+    if (body || !strcmp(method, "POST"))
+        n += sprintf(req + n, "%sContent-Length: %d\r\n", headers && strstr(headers, "Content-Type:") ? "" : "Content-Type: application/x-www-form-urlencoded\r\n", blen);
     n += sprintf(req + n, "\r\n");
     if (conn_write(c, req, n) < 0) return -1;
     if (blen && conn_write(c, body, blen) < 0) return -1;
