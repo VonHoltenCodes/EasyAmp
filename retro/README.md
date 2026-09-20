@@ -83,6 +83,7 @@ any desktop.
 ## Build
 
 ```sh
+make fonts   # regenerate the glyph atlases (needs Pillow, numpy, scipy; commit the result)
 make palette # re-tune the 256-colour palette after a visual change (commit the result)
 make shots   # render every UI state to build/shots/*.png, no Windows needed
 make test    # filters + analyzer, JSON, EQ file formats, list multi-select

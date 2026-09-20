@@ -25,13 +25,16 @@ shots: build/easyamp-shot
 palette: shots
 	python3 tools/mkpalette.py
 
-src/fonts_gen.c: tools/mkfont.py
+# The glyph atlases and the palette are generated, then COMMITTED. They are
+# deliberately not file dependencies: on a fresh checkout every file has the
+# same age, and make would try to regenerate them on a machine without Pillow.
+fonts:
 	python3 tools/mkfont.py
 
 clean:
 	rm -rf build
 
-.PHONY: shots clean palette
+.PHONY: shots clean palette fonts
 
 WINSRC := $(CORE) src/dsp.c src/engine_win32.c src/main_win32.c src/net_win32.c src/plex.c src/json.c src/source.c src/decoders.c
 
