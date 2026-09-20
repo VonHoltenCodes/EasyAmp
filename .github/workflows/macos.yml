@@ -11,8 +11,20 @@ permissions:
 jobs:
   build:
     name: Build macOS .dmg (Apple Silicon)
-    runs-on: macos-14   # Apple Silicon. GitHub no longer offers free Intel
-    steps:               # (macos-13) runners, so Intel users build from source.
+    # Apple Silicon. GitHub no longer offers free Intel runners, so Intel
+    # users build from source.
+    #
+    # The runner's macOS version IS the app's minimum macOS version: Homebrew
+    # bottles are compiled for the OS they are poured on, and every bundled
+    # GTK/GStreamer dylib carries that as its minos. So this is pinned to the
+    # OLDEST macOS Homebrew still ships bottles for. When Homebrew drops it
+    # ("no longer builds bottles for this configuration") the install step
+    # silently starts compiling GTK from source for hours — the timeout below
+    # turns that into a fast failure. Bump this AND LSMinimumSystemVersion in
+    # packaging/macos/EasyAmp.spec together; the minos step enforces the pair.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
       - uses: actions/checkout@v5
 
       - name: Install GTK/GStreamer (Homebrew)
@@ -60,6 +72,27 @@ jobs:
           # ObjC classes collide with GTK4's (process-global namespace).
           GTK3_HITS=$(find "$APP" -iname 'libgtk-3*' -o -iname 'libgdk-3*' -o -iname 'Gtk-3.0.typelib' -o -iname 'Gdk-3.0.typelib')
           if [ -n "$GTK3_HITS" ]; then echo "ERROR: GTK3 leaked into the bundle:"; echo "$GTK3_HITS"; exit 1; fi
+
+      - name: Bundle's real minimum macOS matches Info.plist
+        run: |
+          APP=packaging/macos/dist/EasyAmp.app
+          DECLARED=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")
+          # highest minos across every bundled Mach-O = what dyld will demand
+          REAL=$(find "$APP" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 | \
+            xargs -0 -n 1 vtool -show-build 2>/dev/null | awk '/minos/ {print $2}' | \
+            sort -t. -k1,1n -k2,2n | tail -1)
+          echo "declared LSMinimumSystemVersion: $DECLARED"
+          echo "highest minos in bundle:         $REAL"
+          [ -n "$REAL" ] || { echo "ERROR: could not read minos from any bundled library"; exit 1; }
+          python3 - "$DECLARED" "$REAL" <<'PY'
+          import sys
+          ver = lambda s: tuple(int(x) for x in s.split("."))
+          declared, real = ver(sys.argv[1]), ver(sys.argv[2])
+          if real > declared:
+              sys.exit(f"ERROR: bundled libraries need macOS {sys.argv[2]} but Info.plist "
+                       f"promises {sys.argv[1]} - the app would crash at launch instead of "
+                       f"being refused by Finder. Fix the runner or LSMinimumSystemVersion.")
+          PY
 
       # Forks have no signing identity — a deep ad-hoc re-sign keeps the app
       # launchable on Apple Silicon (PyInstaller's load-path rewrites break

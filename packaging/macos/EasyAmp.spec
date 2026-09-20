@@ -113,7 +113,9 @@ app = BUNDLE(
     bundle_identifier="com.vonholtencodes.EasyAmp",
     info_plist={
         "NSHighResolutionCapable": True,
-        "LSMinimumSystemVersion": "12.0",
+        # Must equal the macOS version of the CI runner (see macos.yml):
+        # the bundled Homebrew dylibs refuse to load on anything older.
+        "LSMinimumSystemVersion": "15.0",
         "CFBundleDisplayName": "EasyAmp",
         "CFBundleShortVersionString": "0.6.3",
     },
