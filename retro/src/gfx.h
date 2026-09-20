@@ -75,4 +75,25 @@ int   gfx_text_w(const ea_font *f, const char *str, int spacing);
 
 ea_px gfx_mix(ea_px a, ea_px b, float t);
 
+/* Convert a rect of `src` to 16-bit pixels with ordered dithering, for High
+ * Color desktops. Left to itself GDI truncates 8-bit channels to 5 or 6 bits,
+ * which erases the skin's subtle work outright: the scanline sheen is a 2-6%
+ * step and the LCD / smoke gradients band. The 8x8 threshold matrix is keyed
+ * to absolute screen position, so partial redraws tile without a seam and
+ * nothing shimmers between frames. green_bits is 6 (5-6-5) or 5 (5-5-5). */
+void  gfx_dither16(const ea_surface *src, int x, int y, int w, int h,
+                   unsigned short *dst, int dst_stride_bytes, int green_bits);
+
+
+/* Palettized desktops (256 or 16 colours): dither into a fixed palette.
+ * `lut` maps 15-bit RGB to the nearest palette index (tools/mkpalette.py);
+ * `spread` is the dither amplitude in 8-bit steps - roughly the distance
+ * between neighbouring palette colours (small for the tuned 236, large for
+ * the VGA 16). Position-keyed like gfx_dither16, so redraws never shimmer. */
+void  gfx_dither_indexed(const ea_surface *src, int x, int y, int w, int h, unsigned char *dst,
+                         int dst_stride_bytes, const unsigned char *lut, int spread);
+
+extern const int EA_PAL256_N;
+extern const unsigned char EA_PAL256[], EA_LUT256[], EA_PAL16[], EA_LUT16[];
+
 #endif

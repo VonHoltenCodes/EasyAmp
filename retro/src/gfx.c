@@ -343,3 +343,52 @@ void gfx_glow_rect(ea_surface *s, int x, int y, int w, int h, int radius, ea_px 
         }
     }
 }
+
+static const unsigned char BAYER8[64] = {
+     0, 32,  8, 40,  2, 34, 10, 42,   48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44,  4, 36, 14, 46,  6, 38,   60, 28, 52, 20, 62, 30, 54, 22,
+     3, 35, 11, 43,  1, 33,  9, 41,   51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47,  7, 39, 13, 45,  5, 37,   63, 31, 55, 23, 61, 29, 53, 21 };
+
+void gfx_dither16(const ea_surface *src, int x, int y, int w, int h,
+                  unsigned short *dst, int dst_stride_bytes, int green_bits)
+{
+    int i, j, gmax = (1 << green_bits) - 1, rshift = 5 + green_bits;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > src->w) w = src->w - x;
+    if (y + h > src->h) h = src->h - y;
+    for (j = 0; j < h; j++) {
+        const ea_px *p = src->px + (y + j) * src->w + x;
+        unsigned short *o = (unsigned short *)((unsigned char *)dst + (y + j) * dst_stride_bytes) + x;
+        const unsigned char *row = BAYER8 + ((y + j) & 7) * 8;
+        for (i = 0; i < w; i++) {
+            /* threshold in 0..254: a value exactly on a 16-bit level stays
+             * flat, anything between two levels is mixed from both */
+            int thr = (row[(x + i) & 7] * 255 + 127) / 64;
+            int r = (EA_R(p[i]) * 31 + thr) / 255, g = (EA_G(p[i]) * gmax + thr) / 255, b = (EA_B(p[i]) * 31 + thr) / 255;
+            o[i] = (unsigned short)((r << rshift) | (g << 5) | b);
+        }
+    }
+}
+
+void gfx_dither_indexed(const ea_surface *src, int x, int y, int w, int h, unsigned char *dst,
+                        int dst_stride_bytes, const unsigned char *lut, int spread)
+{
+    int i, j;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > src->w) w = src->w - x;
+    if (y + h > src->h) h = src->h - y;
+    for (j = 0; j < h; j++) {
+        const ea_px *p = src->px + (y + j) * src->w + x;
+        unsigned char *o = dst + (y + j) * dst_stride_bytes + x;
+        const unsigned char *row = BAYER8 + ((y + j) & 7) * 8;
+        for (i = 0; i < w; i++) {
+            int d = ((row[(x + i) & 7] * 2 - 63) * spread) / 128;     /* -spread/2 .. +spread/2 */
+            int r = EA_R(p[i]) + d, g = EA_G(p[i]) + d, b = EA_B(p[i]) + d;
+            r = r < 0 ? 0 : (r > 255 ? 255 : r); g = g < 0 ? 0 : (g > 255 ? 255 : g); b = b < 0 ? 0 : (b > 255 ? 255 : b);
+            o[i] = lut[((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)];
+        }
+    }
+}

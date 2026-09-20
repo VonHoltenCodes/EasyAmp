@@ -9,7 +9,7 @@ CFLAGS  := -std=c99 -O2 -Wall -Wextra
 WINFLAGS := $(CFLAGS) -march=pentium2 -mtune=pentium3 -mno-sse -mfpmath=387 \
             -Wl,--major-subsystem-version,4 -Wl,--minor-subsystem-version,0 \
             -Wl,--major-os-version,4 -Wl,--minor-os-version,0
-CORE    := src/gfx.c src/app.c src/ui.c src/fonts_gen.c
+CORE    := src/gfx.c src/app.c src/ui.c src/fonts_gen.c src/palette_gen.c
 
 build/easyamp-shot: $(CORE) src/main_shot.c src/*.h
 	@mkdir -p build
@@ -21,13 +21,17 @@ shots: build/easyamp-shot
 	@python3 -c "import glob; from PIL import Image; [Image.open(f).save(f[:-4]+'.png') for f in glob.glob('build/shots/*.bmp')]"
 	@rm -f build/shots/*.bmp
 
+# re-tune the 256-colour palette to the current renders (commit the result)
+palette: shots
+	python3 tools/mkpalette.py
+
 src/fonts_gen.c: tools/mkfont.py
 	python3 tools/mkfont.py
 
 clean:
 	rm -rf build
 
-.PHONY: shots clean
+.PHONY: shots clean palette
 
 WINSRC := $(CORE) src/dsp.c src/engine_win32.c src/main_win32.c
 

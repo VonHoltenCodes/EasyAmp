@@ -21,9 +21,18 @@
 
 typedef struct { char path[MAX_PATH]; } item;
 
+/* how the finished picture reaches the screen, by desktop colour depth */
+enum { PRESENT_DIRECT,      /* 24/32-bit: as drawn */
+       PRESENT_HICOLOR,     /* 15/16-bit: our own ordered dither (GDI would truncate) */
+       PRESENT_PAL256,      /* 256 colours: our palette, tuned to the skin, + dither */
+       PRESENT_VGA16 };     /* 16 colours: dither into the fixed VGA palette */
+
 static HWND       g_wnd;
 static HDC        g_memdc;
-static HBITMAP    g_dib;
+static HBITMAP    g_dib, g_olddib;
+static HPALETTE   g_pal;
+static void      *g_dibbits;
+static int        g_present, g_dib_stride, g_green_bits, g_force_depth;
 static ea_model   g_m;
 static ea_ui     *g_ui;
 static ea_engine *g_eng;
@@ -237,27 +246,120 @@ static void on_eq(void *ctx) { (void)ctx; eng_set_dsp(g_eng, &g_m); }
 
 /* ---- painting ------------------------------------------------------------------------ */
 
+static void presenter_free(void)
+{
+    if (g_memdc) { if (g_olddib) SelectObject(g_memdc, g_olddib); DeleteDC(g_memdc); }
+    if (g_dib) DeleteObject(g_dib);
+    if (g_pal) DeleteObject(g_pal);
+    g_memdc = 0; g_dib = 0; g_olddib = 0; g_pal = 0; g_dibbits = 0;
+}
+
+/* (re)build the off-screen bitmap for the desktop's current colour depth */
+static int presenter_init(void)
+{
+    struct { BITMAPINFOHEADER h; union { RGBQUAD rgb[256]; DWORD mask[3]; } c; } bi;
+    HDC screen = GetDC(0);
+    int bpp = GetDeviceCaps(screen, BITSPIXEL) * GetDeviceCaps(screen, PLANES), i, bits;
+    if (g_force_depth) bpp = g_force_depth;
+    presenter_free();
+    memset(&bi, 0, sizeof bi);
+    bi.h.biSize = sizeof bi.h; bi.h.biWidth = EA_WIN_W; bi.h.biHeight = -EA_WIN_H; bi.h.biPlanes = 1; bi.h.biCompression = BI_RGB;
+    if (bpp >= 24) { g_present = PRESENT_DIRECT; bits = 32; }
+    else if (bpp >= 15) {
+        g_present = PRESENT_HICOLOR; bits = 16;
+        g_green_bits = bpp == 15 ? 5 : 6;
+        if (g_green_bits == 6) { bi.h.biCompression = BI_BITFIELDS; bi.c.mask[0] = 0xf800; bi.c.mask[1] = 0x07e0; bi.c.mask[2] = 0x001f; }
+    } else {
+        const unsigned char *pal = bpp >= 8 ? EA_PAL256 : EA_PAL16;
+        int n = bpp >= 8 ? EA_PAL256_N : 16;
+        g_present = bpp >= 8 ? PRESENT_PAL256 : PRESENT_VGA16; bits = 8;
+        bi.h.biClrUsed = (DWORD)n;
+        for (i = 0; i < n; i++) { bi.c.rgb[i].rgbRed = pal[i * 3]; bi.c.rgb[i].rgbGreen = pal[i * 3 + 1]; bi.c.rgb[i].rgbBlue = pal[i * 3 + 2]; }
+        if (g_present == PRESENT_PAL256) {
+            /* our own logical palette: Windows keeps 20 system colours, the
+             * other 236 slots become the skin's while we are in front */
+            struct { WORD ver, n; PALETTEENTRY e[256]; } lp;
+            lp.ver = 0x300; lp.n = (WORD)n;
+            for (i = 0; i < n; i++) { lp.e[i].peRed = pal[i * 3]; lp.e[i].peGreen = pal[i * 3 + 1]; lp.e[i].peBlue = pal[i * 3 + 2]; lp.e[i].peFlags = 0; }
+            g_pal = CreatePalette((LOGPALETTE *)&lp);
+        }
+    }
+    bi.h.biBitCount = (WORD)bits;
+    g_dib_stride = ((EA_WIN_W * bits + 31) / 32) * 4;
+    g_memdc = CreateCompatibleDC(screen);
+    g_dib = CreateDIBSection(screen, (BITMAPINFO *)&bi, DIB_RGB_COLORS, &g_dibbits, 0, 0);
+    ReleaseDC(0, screen);
+    if (!g_memdc || !g_dib || !g_dibbits) return 0;
+    g_olddib = (HBITMAP)SelectObject(g_memdc, g_dib);
+    return 1;
+}
+
+/* convert one rect of the UI's picture into the off-screen bitmap */
+static void convert(int x, int y, int w, int h)
+{
+    ea_surface *s = ui_surface(g_ui);
+    int j;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > EA_WIN_W) w = EA_WIN_W - x;
+    if (y + h > EA_WIN_H) h = EA_WIN_H - y;
+    if (w <= 0 || h <= 0) return;
+    switch (g_present) {
+    case PRESENT_DIRECT:
+        for (j = 0; j < h; j++) memcpy((ea_px *)g_dibbits + (y + j) * EA_WIN_W + x, s->px + (y + j) * EA_WIN_W + x, (size_t)w * 4);
+        break;
+    case PRESENT_HICOLOR: gfx_dither16(s, x, y, w, h, (unsigned short *)g_dibbits, g_dib_stride, g_green_bits); break;
+    case PRESENT_PAL256:  gfx_dither_indexed(s, x, y, w, h, (unsigned char *)g_dibbits, g_dib_stride, EA_LUT256, 20); break;
+    case PRESENT_VGA16:   gfx_dither_indexed(s, x, y, w, h, (unsigned char *)g_dibbits, g_dib_stride, EA_LUT16, 96); break;
+    }
+}
+
+static void use_palette(HDC dc)
+{
+    if (g_pal) { SelectPalette(dc, g_pal, FALSE); RealizePalette(dc); }
+}
+
 static void present(HDC dc)
 {
     ea_rect d[48];
     int n = ui_render(g_ui, d, 48), i;
-    for (i = 0; i < n; i++) BitBlt(dc, d[i].x, d[i].y, d[i].w, d[i].h, g_memdc, d[i].x, d[i].y, SRCCOPY);
+    use_palette(dc);
+    for (i = 0; i < n; i++) {
+        convert(d[i].x, d[i].y, d[i].w, d[i].h);
+        BitBlt(dc, d[i].x, d[i].y, d[i].w, d[i].h, g_memdc, d[i].x, d[i].y, SRCCOPY);
+    }
 }
 
+/* /shot: save the picture as presented - read back through GDI from the
+ * off-screen bitmap, so an indexed or 16-bit mode is captured as the screen
+ * would show it and the colour table itself is part of what gets checked */
 static void save_shot(void)
 {
-    ea_surface *s = ui_surface(g_ui);
     BITMAPFILEHEADER fh;
-    BITMAPINFOHEADER ih;
-    FILE *f = fopen(g_shot, "wb");
-    int y;
-    if (!f) return;
-    memset(&fh, 0, sizeof fh); memset(&ih, 0, sizeof ih);
-    fh.bfType = 0x4d42; fh.bfOffBits = sizeof fh + sizeof ih; fh.bfSize = fh.bfOffBits + (DWORD)(s->w * s->h * 4);
-    ih.biSize = sizeof ih; ih.biWidth = s->w; ih.biHeight = s->h; ih.biPlanes = 1; ih.biBitCount = 32;
-    fwrite(&fh, sizeof fh, 1, f); fwrite(&ih, sizeof ih, 1, f);
-    for (y = s->h - 1; y >= 0; y--) fwrite(s->px + y * s->w, 4, (size_t)s->w, f);
-    fclose(f);
+    BITMAPINFO bi;
+    HDC screen = GetDC(0), dc = CreateCompatibleDC(screen);
+    void *bits = 0;
+    HBITMAP bm, old;
+    FILE *f;
+    memset(&bi, 0, sizeof bi);
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader; bi.bmiHeader.biWidth = EA_WIN_W; bi.bmiHeader.biHeight = EA_WIN_H;
+    bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+    bm = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, 0, 0);
+    ReleaseDC(0, screen);
+    if (!dc || !bm) return;
+    old = (HBITMAP)SelectObject(dc, bm);
+    convert(0, 0, EA_WIN_W, EA_WIN_H);
+    BitBlt(dc, 0, 0, EA_WIN_W, EA_WIN_H, g_memdc, 0, 0, SRCCOPY);
+    GdiFlush();
+    f = fopen(g_shot, "wb");
+    if (f) {
+        memset(&fh, 0, sizeof fh);
+        fh.bfType = 0x4d42; fh.bfOffBits = sizeof fh + sizeof bi.bmiHeader; fh.bfSize = fh.bfOffBits + EA_WIN_W * EA_WIN_H * 4;
+        fwrite(&fh, sizeof fh, 1, f); fwrite(&bi.bmiHeader, sizeof bi.bmiHeader, 1, f);
+        fwrite(bits, 4, EA_WIN_W * EA_WIN_H, f);
+        fclose(f);
+    }
+    SelectObject(dc, old); DeleteObject(bm); DeleteDC(dc);
 }
 
 static void frame(void)
@@ -302,11 +404,24 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
+        int pw = ps.rcPaint.right - ps.rcPaint.left, ph = ps.rcPaint.bottom - ps.rcPaint.top;
         present(dc);
-        BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
-               g_memdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+        convert(ps.rcPaint.left, ps.rcPaint.top, pw, ph);
+        BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, pw, ph, g_memdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
         EndPaint(h, &ps);
         return 0; }
+    /* 256-colour desktops: take the palette when we come to the front, and
+     * re-map when another program has just taken it */
+    case WM_QUERYNEWPALETTE:
+        if (g_pal) { HDC dc = GetDC(h); use_palette(dc); ReleaseDC(h, dc); InvalidateRect(h, 0, FALSE); return TRUE; }
+        return FALSE;
+    case WM_PALETTECHANGED:
+        if (g_pal && (HWND)wp != h) { HDC dc = GetDC(h); use_palette(dc); ReleaseDC(h, dc); InvalidateRect(h, 0, FALSE); }
+        return 0;
+    case WM_DISPLAYCHANGE:          /* the user changed colour depth: pick the matching path */
+        presenter_init();
+        InvalidateRect(h, 0, FALSE);
+        return 0;
     case WM_ERASEBKGND: return 1;
     case WM_TIMER: frame(); return 0;
     case WM_NCHITTEST: {
@@ -340,35 +455,17 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcA(h, msg, wp, lp);
 }
 
-static int make_dib(ea_px **pixels)
-{
-    BITMAPINFO bi;
-    HDC screen = GetDC(0);
-    memset(&bi, 0, sizeof bi);
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
-    bi.bmiHeader.biWidth = EA_WIN_W; bi.bmiHeader.biHeight = -EA_WIN_H;      /* top-down */
-    bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
-    g_memdc = CreateCompatibleDC(screen);
-    g_dib = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, (void **)pixels, 0, 0);
-    ReleaseDC(0, screen);
-    if (!g_memdc || !g_dib) return 0;
-    SelectObject(g_memdc, g_dib);
-    return 1;
-}
-
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 {
     WNDCLASSA wc;
     ea_actions act;
-    ea_px *pixels = 0;
     MSG msg;
     int i, sx, sy, page = 0, autoplay = 0;
     (void)prev; (void)cmdline;
 
     ea_model_init(&g_m);
-    if (!make_dib(&pixels)) { MessageBoxA(0, "Could not create the display surface.", "EasyAmp", MB_ICONERROR); return 1; }
     act.ctx = 0; act.command = on_command; act.seek = on_seek; act.play_index = play_index; act.eq_changed = on_eq;
-    g_ui = ui_create(&g_m, &act, pixels);
+    g_ui = ui_create(&g_m, &act, 0);
     g_eng = eng_create();
     if (!g_ui || !g_eng) { MessageBoxA(0, "Out of memory.", "EasyAmp", MB_ICONERROR); return 1; }
 
@@ -377,11 +474,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         if (!strncmp(a, "/shot:", 6)) { strncpy(g_shot, a + 6, MAX_PATH - 1); if (!g_shot_at) g_shot_at = 1500; }
         else if (!strncmp(a, "/shotms:", 8)) g_shot_at = (DWORD)atoi(a + 8);
         else if (!strncmp(a, "/page:", 6)) page = atoi(a + 6);
+        else if (!strncmp(a, "/depth:", 7)) g_force_depth = atoi(a + 7);      /* 32, 16, 15, 8, 4: try a colour path on any desktop */
         else if (!strncmp(a, "/preset:", 8)) { int p = atoi(a + 8); if (p >= 0 && p < ea_preset_count()) ea_preset_apply(&g_m, p); }
         else if (!strncmp(a, "/vu", 3)) g_m.viz_vu = 1;
         else { const char *dot = strrchr(a, '.'); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
     }
     eng_set_dsp(g_eng, &g_m);
+    if (!presenter_init()) { MessageBoxA(0, "Could not create the display surface.", "EasyAmp", MB_ICONERROR); return 1; }
 
     memset(&wc, 0, sizeof wc);
     wc.style = CS_DBLCLKS | CS_OWNDC;
@@ -403,5 +502,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     while (GetMessageA(&msg, 0, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessageA(&msg); }
     eng_destroy(g_eng);
     ui_destroy(g_ui);
+    presenter_free();
     return 0;
 }

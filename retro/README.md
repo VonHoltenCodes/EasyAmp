@@ -22,9 +22,33 @@ preset roster, same playlist format, written from scratch in C.
 | Playback | `src/engine_win32.c` | Worker thread: minimp3 / PCM WAV → varispeed → DSP → `waveOut`. Meters are analysed at the position the card is actually playing. |
 | Shell | `src/main_win32.c` | Borderless window, file dialogs, drag and drop, ID3 titles, m3u. |
 
+## Colour depth
+
+Windows 98 boxes run anything from 16 colours to true colour, and left alone
+GDI ruins a subtle skin on all but the last: it truncates to 16-bit (erasing
+the 2-6% scanline sheen and banding the gradients), and on a 256-colour
+desktop it maps everything onto a default palette with almost no dark blues.
+So the client converts its own picture, per desktop depth, re-checked on
+`WM_DISPLAYCHANGE`:
+
+| Desktop | Path |
+|---|---|
+| 24 / 32-bit | as drawn |
+| 15 / 16-bit | ordered dither to 5-5-5 / 5-6-5 |
+| 256 colours | its own 236-colour palette, tuned to the skin from the app's renders (`make palette`), realized while in front, plus dither |
+| 16 colours | dither into the fixed VGA 16 |
+
+The dither matrix is keyed to screen position, so partial redraws tile
+without seams and nothing shimmers. `/depth:32|16|15|8|4` forces a path on
+any desktop.
+
+![256 colours](docs/retro-player-256-colours.png)
+![16 colours](docs/retro-player-16-colours.png)
+
 ## Build
 
 ```sh
+make palette # re-tune the 256-colour palette after a visual change (commit the result)
 make shots   # render every UI state to build/shots/*.png, no Windows needed
 make test    # known-answer checks for the filters and the analyzer
 make win     # cross-compile build/EASYAMP.EXE (needs i686-w64-mingw32-gcc)

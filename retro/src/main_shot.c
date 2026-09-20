@@ -34,6 +34,44 @@ static int write_bmp(const char *path, const ea_surface *s)
     return 1;
 }
 
+/* the same picture as a High Color (5-6-5) desktop shows it */
+static void shot16(ea_ui *ui, const char *dir, const char *name, int dither)
+{
+    ea_surface *s = ui_surface(ui), out;
+    static unsigned short buf16[EA_WIN_W * EA_WIN_H];
+    static ea_px px[EA_WIN_W * EA_WIN_H];
+    char path[512];
+    int i;
+    if (dither) gfx_dither16(s, 0, 0, s->w, s->h, buf16, s->w * 2, 6);
+    for (i = 0; i < s->w * s->h; i++) {
+        int r, g, b;
+        if (dither) { r = buf16[i] >> 11; g = (buf16[i] >> 5) & 63; b = buf16[i] & 31; }
+        else { r = EA_R(s->px[i]) >> 3; g = EA_G(s->px[i]) >> 2; b = EA_B(s->px[i]) >> 3; }     /* GDI: truncate */
+        px[i] = EA_RGB(r * 255 / 31, g * 255 / 63, b * 255 / 31);
+    }
+    gfx_init(&out, s->w, s->h, px);
+    sprintf(path, "%s/%s.bmp", dir, name);
+    write_bmp(path, &out);
+    printf("%s\n", path);
+}
+
+/* the same picture on a palettized desktop */
+static void shot_indexed(ea_ui *ui, const char *dir, const char *name, const unsigned char *pal,
+                         const unsigned char *lut, int spread)
+{
+    ea_surface *s = ui_surface(ui), out;
+    static unsigned char idx[EA_WIN_W * EA_WIN_H];
+    static ea_px px[EA_WIN_W * EA_WIN_H];
+    char path[512];
+    int i;
+    gfx_dither_indexed(s, 0, 0, s->w, s->h, idx, s->w, lut, spread);
+    for (i = 0; i < s->w * s->h; i++) px[i] = EA_RGB(pal[idx[i] * 3], pal[idx[i] * 3 + 1], pal[idx[i] * 3 + 2]);
+    gfx_init(&out, s->w, s->h, px);
+    sprintf(path, "%s/%s.bmp", dir, name);
+    write_bmp(path, &out);
+    printf("%s\n", path);
+}
+
 static void demo(ea_model *m, ea_track *tracks)
 {
     static const float spec[EA_VIZ_BANDS] = { 0.48f, 0.62f, 0.66f, 0.82f, 0.62f, 0.42f, 0.38f, 0.37f, 0.34f, 0.33f,
@@ -74,6 +112,10 @@ int main(int argc, char **argv)
     if (!ui) return 1;
     ui_model_changed(ui, UI_CH_ALL);
     shot(ui, dir, "player");
+    shot16(ui, dir, "player-16bit-gdi", 0);
+    shot16(ui, dir, "player-16bit-dithered", 1);
+    shot_indexed(ui, dir, "player-256", EA_PAL256, EA_LUT256, 20);
+    shot_indexed(ui, dir, "player-vga16", EA_PAL16, EA_LUT16, 96);
     m.viz_vu = 1; ui_model_changed(ui, UI_CH_VIZ);
     ui_mouse_move(ui, 60, 288);                                  /* hover a transport button */
     shot(ui, dir, "player-vu-hover");
@@ -91,6 +133,8 @@ int main(int argc, char **argv)
     ui_mouse_up(ui, 110, 290);
     ui_set_page(ui, EA_PAGE_EQ);
     shot(ui, dir, "equalizer");
+    shot_indexed(ui, dir, "equalizer-256", EA_PAL256, EA_LUT256, 20);
+    shot_indexed(ui, dir, "equalizer-vga16", EA_PAL16, EA_LUT16, 96);
     ea_set_nbands(&m, 24); m.selband = 7; m.balance = -0.3f; m.pitch = 1.04f;
     ui_model_changed(ui, UI_CH_EQ);
     shot(ui, dir, "equalizer-24");

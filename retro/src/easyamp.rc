@@ -1,7 +1,7 @@
 1 ICON "easyamp.ico"
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION 0,1,1,0
+PRODUCTVERSION 0,1,1,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -9,9 +9,9 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "VonHoltenCodes"
       VALUE "FileDescription", "EasyAmp"
-      VALUE "FileVersion", "0.1.0"
+      VALUE "FileVersion", "0.1.1"
       VALUE "ProductName", "EasyAmp"
-      VALUE "ProductVersion", "0.1.0"
+      VALUE "ProductVersion", "0.1.1"
       VALUE "LegalCopyright", "MIT License"
     END
   END
