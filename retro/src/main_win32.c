@@ -230,6 +230,8 @@ typedef struct {
     ea_source src;                                  /* a COPY: the worker never touches g_src */
     char node[96], field[3][128];
     int then_play;
+    ea_sitem *targets;                              /* COLLECT: the rows to gather, in list order (owned by the job) */
+    int ntargets;
     /* out */
     char code[8], status[96], err[200];
     ea_source result;
@@ -248,10 +250,12 @@ static ea_sitem *g_lib;                             /* the level on screen */
 static int       g_nlib, g_depth;
 static char      g_nodes[MAX_DEPTH][96], g_names[MAX_DEPTH][128];
 static int       g_script[8], g_script_n, g_script_pos;   /* /open:1,0,2 - rows to open as levels load (testing) */
+static int       g_then;                                  /* /then:add|addall|play - press it when the /open script ends (testing) */
 static int       g_want_acct = -1;                        /* /acct:N - which saved account to open at startup (testing) */
 static char      g_auto_jf[3][128];                       /* /jf:server,user,pass - sign in at startup (testing) */
 
 static void on_src_open(void *ctx, int idx);
+static void on_command(void *ctx, int cmd);
 
 static void ini_path(void)
 {
@@ -402,7 +406,10 @@ static DWORD WINAPI job_thread(LPVOID arg)
         j->ok = j->items != 0;
         break;
     case JOB_COLLECT:
-        collect_node(j, j->node, 0);
+        for (i = 0; i < j->ntargets && !j->cancel && j->nitems < COLLECT_CAP; i++) {
+            if (j->targets[i].is_track) { append_items(j, &j->targets[i], 1); j->ok = 1; }
+            else collect_node(j, j->targets[i].node, 0);
+        }
         break;
     }
     InterlockedExchange(&j->done, 1);
@@ -417,6 +424,7 @@ static int job_start(int kind)
     keep = g_job;
     memset(&g_job, 0, sizeof g_job);
     strcpy(g_job.node, keep.node); g_job.then_play = keep.then_play; g_job.src = keep.src;
+    g_job.targets = keep.targets; g_job.ntargets = keep.ntargets;
     memcpy(g_job.field, keep.field, sizeof g_job.field);
     g_job.kind = kind;
     g_job.thread = CreateThread(0, 0, job_thread, &g_job, 0, &tid);
@@ -492,25 +500,39 @@ static void on_src_open(void *ctx, int idx)
     browse(g_nodes[g_depth]);
 }
 
-/* PLAY / ADD: the selected row - a track, or every track underneath a folder */
-static void collect(int then_play)
+/* PLAY / ADD / ADD ALL: the marked rows (or the one the cursor is on), in list
+ * order - tracks as they are, folders expanded to every track beneath them */
+static void collect(int then_play, int everything)
 {
-    ea_sitem *it;
-    if (!g_nsrc || g_job.kind != JOB_NONE || g_m.src_sel < 0 || g_m.src_sel >= g_nlib) return;
-    it = &g_lib[g_m.src_sel];
-    if (it->is_track) {
-        int first = g_m.ntracks;
-        add_track(it);
-        ui_model_changed(g_ui, UI_CH_PLAYLIST);
-        if (then_play) play_index(0, first);
-        strcpy(g_m.src_status, "ADDED 1 TRACK"); ui_model_changed(g_ui, UI_CH_SOURCES);
+    ea_sitem *t;
+    int i, n = 0, folders = 0, marked = 0;
+    if (!g_nsrc || g_job.kind != JOB_NONE || g_nlib <= 0) return;
+    for (i = 0; i < g_nlib && i < g_m.src_nitems; i++) marked += g_m.src_items[i].marked != 0;
+    if (!everything && !marked && (g_m.src_sel < 0 || g_m.src_sel >= g_nlib)) return;
+    t = (ea_sitem *)malloc(sizeof(ea_sitem) * (size_t)g_nlib);
+    if (!t) return;
+    for (i = 0; i < g_nlib; i++) {
+        int take = everything || (marked ? (i < g_m.src_nitems && g_m.src_items[i].marked) : i == g_m.src_sel);
+        if (take) { t[n++] = g_lib[i]; folders += !g_lib[i].is_track; }
+    }
+    if (folders && g_depth == 0) {                               /* a whole library is tens of thousands of tracks */
+        free(t);
+        strcpy(g_m.src_status, "OPEN THE LIBRARY FIRST"); ui_model_changed(g_ui, UI_CH_SOURCES);
         return;
     }
-    if (g_depth == 0) { strcpy(g_m.src_status, "OPEN THE LIBRARY AND PICK AN ARTIST OR ALBUM"); ui_model_changed(g_ui, UI_CH_SOURCES); return; }
-    strcpy(g_job.node, it->node);
+    if (!folders) {                                              /* only tracks: nothing to fetch */
+        int first = g_m.ntracks;
+        for (i = 0; i < n; i++) add_track(&t[i]);
+        free(t);
+        ui_model_changed(g_ui, UI_CH_PLAYLIST);
+        if (then_play && g_m.ntracks > first) play_index(0, first);
+        sprintf(g_m.src_status, "ADDED %d TRACK%s", n, n == 1 ? "" : "S"); ui_model_changed(g_ui, UI_CH_SOURCES);
+        return;
+    }
+    g_job.targets = t; g_job.ntargets = n;
     g_job.src = g_src[g_m.acct_sel]; g_job.then_play = then_play;
-    if (!job_start(JOB_COLLECT)) return;
-    g_m.src_busy = 1; strcpy(g_m.src_status, "COLLECTING TRACKS...");
+    if (!job_start(JOB_COLLECT)) { free(t); g_job.targets = 0; g_job.ntargets = 0; return; }
+    g_m.src_busy = 1; strcpy(g_m.src_status, "COLLECTING... BACK TO STOP");
     ui_model_changed(g_ui, UI_CH_SOURCES);
 }
 
@@ -551,6 +573,10 @@ static void job_poll(void)
     if (j->kind == JOB_LINK && g_m.link_open) {
         if (j->code_ready && strcmp(g_m.link_code, j->code)) { strcpy(g_m.link_code, j->code); ui_model_changed(g_ui, UI_CH_SOURCES); }
         if (strcmp(g_m.link_status, j->status)) { strcpy(g_m.link_status, j->status); ui_model_changed(g_ui, UI_CH_SOURCES); }
+    }
+    if (j->kind == JOB_COLLECT && !j->done) {                     /* a live count: a whole artist list can take minutes */
+        static int shown = -1;
+        if (j->nitems != shown) { shown = j->nitems; sprintf(g_m.src_status, "%d TRACKS... BACK TO STOP", shown); ui_model_changed(g_ui, UI_CH_SOURCES); }
     }
     if (!j->done) return;
     WaitForSingleObject(j->thread, 2000); CloseHandle(j->thread);
@@ -597,6 +623,7 @@ static void job_poll(void)
                 on_src_open(0, row);
                 return;
             }
+            if (g_then) { int c = g_then; g_then = 0; j->kind = JOB_NONE; g_m.src_busy = 0; on_command(0, c); ui_model_changed(g_ui, UI_CH_SOURCES); return; }
         } else {
             if (g_depth > 0) g_depth--;
             else if (g_m.acct_sel >= 0 && g_m.acct_sel < g_nsrc) g_m.accts[g_m.acct_sel].state = EA_SRC_UNREACHABLE;
@@ -612,6 +639,7 @@ static void job_poll(void)
             if (j->then_play) play_index(0, first);
         } else _snprintf(g_m.src_status, sizeof g_m.src_status, "%s", j->err[0] ? j->err : "NO TRACKS HERE");
         free(j->items); j->items = 0;
+        free(j->targets); j->targets = 0; j->ntargets = 0;
         break; }
     }
     g_m.src_status[sizeof g_m.src_status - 1] = 0;
@@ -800,8 +828,14 @@ static void on_command(void *ctx, int cmd)
     case EA_CMD_STOP:      eng_stop(g_eng); break;
     case EA_CMD_PREV:      if (g_m.ntracks) play_index(0, g_m.cur > 0 ? g_m.cur - 1 : 0); break;
     case EA_CMD_NEXT:      if (g_m.cur + 1 < g_m.ntracks) play_index(0, g_m.cur + 1); break;
-    case EA_CMD_PL_REMOVE: if (g_m.sel == g_m.cur && g_m.cur >= 0) eng_stop(g_eng);
-                           pl_remove(g_m.sel); ui_model_changed(g_ui, UI_CH_PLAYLIST); break;
+    case EA_CMD_PL_REMOVE: {
+        int k, marked = 0;
+        for (k = 0; k < g_m.ntracks; k++) marked += g_m.tracks[k].marked != 0;
+        if (!marked) { if (g_m.sel == g_m.cur && g_m.cur >= 0) eng_stop(g_eng); pl_remove(g_m.sel); }
+        else for (k = g_m.ntracks - 1; k >= 0; k--) if (g_m.tracks[k].marked) { if (k == g_m.cur) eng_stop(g_eng); pl_remove(k); }
+        for (k = 0; k < g_m.ntracks; k++) g_m.tracks[k].marked = 0;
+        ui_model_changed(g_ui, UI_CH_PLAYLIST);
+        break; }
     case EA_CMD_PL_CLEAR:  eng_stop(g_eng); pl_clear(); g_m.title[0] = 0; ui_model_changed(g_ui, UI_CH_PLAYLIST | UI_CH_TITLE); break;
     case EA_CMD_PL_LOAD:
         if (ask_file(0, "Playlist (*.m3u)\0*.m3u;*.m3u8\0", 0, path, MAX_PATH, 0)) { eng_stop(g_eng); pl_clear(); m3u_load(path); ui_model_changed(g_ui, UI_CH_PLAYLIST); }
@@ -835,10 +869,12 @@ static void on_command(void *ctx, int cmd)
         break;
     case EA_CMD_SRC_REMOVE:   source_remove_selected(); break;
     case EA_CMD_SRC_BACK:
+        if (g_job.kind == JOB_COLLECT) { InterlockedExchange(&g_job.cancel, 1); break; }     /* stop gathering; keep what was found */
         if (g_nsrc && g_depth > 0 && g_job.kind == JOB_NONE) { g_depth--; browse(g_nodes[g_depth]); }
         break;
-    case EA_CMD_SRC_PLAY: collect(1); break;
-    case EA_CMD_SRC_ADD:  collect(0); break;
+    case EA_CMD_SRC_PLAY:    collect(1, 0); break;
+    case EA_CMD_SRC_ADD:     collect(0, 0); break;
+    case EA_CMD_SRC_ADD_ALL: collect(0, 1); break;
     case EA_CMD_EQ_IMPORT:     eq_import_file(); break;
     case EA_CMD_EQ_EXPORT_APO: eq_export_file(0); break;
     case EA_CMD_EQ_EXPORT_GEQ: eq_export_file(1); break;
@@ -1038,7 +1074,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ScreenToClient(h, &p);
         return ui_is_caption(g_ui, p.x, p.y) ? HTCAPTION : HTCLIENT; }
     case WM_MOUSEMOVE:   ui_mouse_move(g_ui, x, y); return 0;
-    case WM_LBUTTONDOWN: SetCapture(h); ui_mouse_down(g_ui, x, y); return 0;
+    case WM_LBUTTONDOWN: SetCapture(h); ui_set_mods(g_ui, ((wp & MK_SHIFT) ? UI_MOD_SHIFT : 0) | ((wp & MK_CONTROL) ? UI_MOD_CTRL : 0)); ui_mouse_down(g_ui, x, y); return 0;
     case WM_LBUTTONUP:   ui_mouse_up(g_ui, x, y); ReleaseCapture(); return 0;
     case WM_LBUTTONDBLCLK: ui_mouse_dbl(g_ui, x, y); return 0;
     case WM_MOUSEWHEEL: {
@@ -1047,7 +1083,11 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ScreenToClient(h, &p);
         ui_wheel(g_ui, p.x, p.y, (short)HIWORD(wp) / 120);
         return 0; }
-    case WM_KEYDOWN: { int k = map_key(wp); if (k) ui_key(g_ui, k); return 0; }
+    case WM_KEYDOWN: {
+        int ctrl = GetKeyState(VK_CONTROL) < 0, k = ctrl && wp == 'A' ? UI_KEY_SELECT_ALL : map_key(wp);
+        ui_set_mods(g_ui, (GetKeyState(VK_SHIFT) < 0 ? UI_MOD_SHIFT : 0) | (ctrl ? UI_MOD_CTRL : 0));
+        if (k) ui_key(g_ui, k);
+        return 0; }
     case WM_CHAR: ui_char(g_ui, (int)wp); return 0;
     case WM_DROPFILES: {
         HDROP d = (HDROP)wp;
@@ -1096,6 +1136,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         else if (!strncmp(a, "/jf:", 4)) { char t[400], *c1, *c2; strncpy(t, a + 4, sizeof t - 1); t[sizeof t - 1] = 0;
             if ((c1 = strchr(t, ',')) != 0 && (c2 = strchr(c1 + 1, ',')) != 0) { *c1 = 0; *c2 = 0; strcpy(g_auto_jf[0], t); strcpy(g_auto_jf[1], c1 + 1); strcpy(g_auto_jf[2], c2 + 1); } }
         else if (!strncmp(a, "/acct:", 6)) g_want_acct = atoi(a + 6);
+        else if (!strncmp(a, "/then:", 6)) g_then = !strcmp(a + 6, "addall") ? EA_CMD_SRC_ADD_ALL : !strcmp(a + 6, "play") ? EA_CMD_SRC_PLAY : EA_CMD_SRC_ADD;
         else if (!strncmp(a, "/open:", 6)) { const char *q = a + 6; while (*q && g_script_n < 8) { g_script[g_script_n++] = atoi(q); q = strchr(q, ','); if (!q) break; q++; } }
         else { const char *dot = strrchr(a, '.'); if (!autoplay) pl_clear(); if (dot && !lstrcmpiA(dot, ".m3u")) m3u_load(a); else pl_add(a); autoplay = 1; }
     }

@@ -27,8 +27,11 @@
 #define UI_CH_ALL       0xff
 
 /* key codes the shell translates to */
+#define UI_MOD_SHIFT 1
+#define UI_MOD_CTRL  2
+
 enum { UI_KEY_UP = 1, UI_KEY_DOWN, UI_KEY_PGUP, UI_KEY_PGDN, UI_KEY_HOME, UI_KEY_END,
-       UI_KEY_ENTER, UI_KEY_DELETE, UI_KEY_ESC, UI_KEY_SPACE };
+       UI_KEY_ENTER, UI_KEY_DELETE, UI_KEY_ESC, UI_KEY_SPACE, UI_KEY_SELECT_ALL };
 
 typedef struct ea_ui ea_ui;
 
@@ -42,6 +45,8 @@ void ui_model_changed(ea_ui *ui, int what);
 void ui_tick(ea_ui *ui, int elapsed_ms);             /* marquee, peak decay */
 int  ui_render(ea_ui *ui, ea_rect *dirty, int max);  /* returns rects written */
 
+/* Shift / Ctrl state for the NEXT mouse or key event: list multi-select */
+void ui_set_mods(ea_ui *ui, int mods);
 void ui_mouse_move(ea_ui *ui, int x, int y);
 void ui_mouse_down(ea_ui *ui, int x, int y);
 void ui_mouse_up(ea_ui *ui, int x, int y);

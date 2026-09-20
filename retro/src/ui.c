@@ -99,7 +99,7 @@ typedef struct {
     float vmin, vmax, vstep, vdef; /* knobs */
 } widget;
 
-typedef struct { int scroll, thumb_drag, thumb_off; } lview;
+typedef struct { int scroll, thumb_drag, thumb_off, anchor; } lview;
 
 #define MAX_WIDGETS 96
 #define MAX_MENU 12
@@ -125,7 +125,7 @@ struct ea_ui {
     struct { ea_rect display, viz, xport, eqbar, eqctl, eqsmall; int eq, pl; } L;
     int ix_status, ix_info, ix_scope, ix_seek, ix_viz, ix_xport, ix_led, ix_eqbtn, ix_eqsmall, ix_pl, ix_plbtn;
     int dlg_was_open, dlg_hover, dlg_down;
-    int caret_on, caret_acc;
+    int caret_on, caret_acc, mods;
 };
 
 /* ======================================================================== */
@@ -785,17 +785,56 @@ static int lv_index_at(const ea_rect *r, const lview *v, int n, int y)
     return idx >= 0 && idx < n && y >= r->y + 2 ? idx : -1;
 }
 
+/* multi-select. Each list keeps a `marked` flag per row; `sel` is the row the
+ * keyboard sits on and the anchor a Shift range grows from. With nothing
+ * marked the `sel` row stands in, so a plain click behaves as it always did. */
+typedef int *(*lv_mark_fn)(ea_ui *ui, int idx);
+
+static int *pl_mark(ea_ui *ui, int i) { return &ui->m->tracks[i].marked; }
+static int *lib_mark(ea_ui *ui, int i) { return &ui->m->src_items[i].marked; }
+
+static int any_marked(ea_ui *ui, lv_mark_fn mk, int n)
+{
+    int i;
+    for (i = 0; i < n; i++) if (*mk(ui, i)) return 1;
+    return 0;
+}
+
+static void marks_set(ea_ui *ui, lv_mark_fn mk, int n, int from, int to, int clear_first)
+{
+    int i, lo = from < to ? from : to, hi = from < to ? to : from;
+    if (clear_first) for (i = 0; i < n; i++) *mk(ui, i) = 0;
+    for (i = lo; i <= hi && i < n; i++) if (i >= 0) *mk(ui, i) = 1;
+}
+
+/* a click (or a keyboard move) landed on `row` */
+static void marks_touch(ea_ui *ui, lview *v, lv_mark_fn mk, int n, int row, int *sel)
+{
+    if (row < 0 || row >= n) {                                   /* empty space below the rows: deselect */
+        int i;
+        if (!(ui->mods & (UI_MOD_SHIFT | UI_MOD_CTRL))) { for (i = 0; i < n; i++) *mk(ui, i) = 0; *sel = -1; }
+        return;
+    }
+    if (ui->mods & UI_MOD_SHIFT) marks_set(ui, mk, n, v->anchor >= 0 && v->anchor < n ? v->anchor : row, row, !(ui->mods & UI_MOD_CTRL));
+    else if (ui->mods & UI_MOD_CTRL) {
+        if (!any_marked(ui, mk, n) && *sel >= 0 && *sel < n && *sel != row) *mk(ui, *sel) = 1;   /* the stand-in row becomes a real mark */
+        *mk(ui, row) = !*mk(ui, row);
+        v->anchor = row;
+    } else { marks_set(ui, mk, n, row, row, 1); v->anchor = row; }
+    *sel = row;
+}
+
 typedef void (*lv_text_fn)(ea_ui *ui, int idx, char *out, int cap);
 
-static void lv_draw(ea_ui *ui, const ea_rect *r, lview *v, int n, int sel, int cur, lv_text_fn text)
+static void lv_draw(ea_ui *ui, const ea_rect *r, lview *v, int n, int sel, int cur, lv_text_fn text, lv_mark_fn mk)
 {
     ea_surface *s = &ui->fb;
-    int rows = lv_rows(r), i, scroll = n > rows;
+    int rows = lv_rows(r), i, scroll = n > rows, marks = any_marked(ui, mk, n);
     ea_rect th;
     lv_clamp(r, v, n);
     gfx_clip(s, r->x + 1, r->y + 1, r->w - 2 - (scroll ? 9 : 0), r->h - 2);
     for (i = 0; i < rows && v->scroll + i < n; i++) {
-        int idx = v->scroll + i, y = r->y + 2 + i * PL_ROW_H, issel = idx == sel;
+        int idx = v->scroll + i, y = r->y + 2 + i * PL_ROW_H, issel = marks ? *mk(ui, idx) : idx == sel;
         char line[220];
         if (issel) gfx_fill(s, r->x + 1, y, r->w - 2, PL_ROW_H, C_SELECT);
         text(ui, idx, line, (int)sizeof line);
@@ -844,7 +883,7 @@ static void pl_text(ea_ui *ui, int idx, char *out, int cap)
 
 static void draw_playlist(ea_ui *ui, widget *w)
 {
-    lv_draw(ui, &w->r, &ui->pl, ui->m->ntracks, ui->m->sel, ui->m->cur, pl_text);
+    lv_draw(ui, &w->r, &ui->pl, ui->m->ntracks, ui->m->sel, ui->m->cur, pl_text, pl_mark);
 }
 
 /* ---- sources page ------------------------------------------------------------------- */
@@ -858,7 +897,7 @@ static void lib_text(ea_ui *ui, int idx, char *out, int cap)
 static void draw_liblist(ea_ui *ui, widget *w)
 {
     ea_model *m = ui->m;
-    if (m->src_nitems > 0 && m->src_items) { lv_draw(ui, &w->r, &ui->lib, m->src_nitems, m->src_sel, -1, lib_text); return; }
+    if (m->src_nitems > 0 && m->src_items) { lv_draw(ui, &w->r, &ui->lib, m->src_nitems, m->src_sel, -1, lib_text, lib_mark); return; }
     {
         ea_rect msg = w->r;
         int st = m->naccts > 0 && m->acct_sel >= 0 && m->acct_sel < m->naccts ? m->accts[m->acct_sel].state : EA_SRC_NONE;
@@ -907,9 +946,14 @@ static void draw_crumb(ea_ui *ui, widget *w)
 static void draw_srcstatus(ea_ui *ui, widget *w)
 {
     ea_surface *s = &ui->fb;
+    ea_model *m = ui->m;
+    char sel[32];
+    const char *t = m->src_status;
+    int i, marked = 0;
+    for (i = 0; i < m->src_nitems && m->src_items; i++) marked += m->src_items[i].marked != 0;
+    if (marked > 1 && !m->src_busy) { sprintf(sel, "%d SELECTED", marked); t = sel; }
     gfx_clip(s, w->r.x, w->r.y, w->r.w, w->r.h);
-    gfx_text(s, &EA_FONT_IND, w->r.x, text_base(&EA_FONT_IND, w->r.y, w->r.h), ui->m->src_status, C_LCD_ON, 1,
-             ui->m->src_busy ? GFX_GLOW : 0, C_LCD_ON);
+    gfx_text(s, &EA_FONT_IND, w->r.x, text_base(&EA_FONT_IND, w->r.y, w->r.h), t, C_LCD_ON, 1, m->src_busy ? GFX_GLOW : 0, C_LCD_ON);
     gfx_unclip(s);
 }
 
@@ -1289,7 +1333,8 @@ static void build_widgets(ea_ui *ui)
     add(ui, K_BUTTON, S, 250, 517, 58, 30, "BACK", 0, EA_CMD_SRC_BACK);
     add(ui, K_BUTTON, S, 311, 517, 58, 30, "PLAY", 0, EA_CMD_SRC_PLAY);
     add(ui, K_BUTTON, S, 372, 517, 52, 30, "ADD", 0, EA_CMD_SRC_ADD);
-    add(ui, K_SRCSTATUS, S, 434, 517, 288, 30, 0, 0, 0);
+    add(ui, K_BUTTON, S, 427, 517, 78, 30, "ADD ALL", 0, EA_CMD_SRC_ADD_ALL);
+    add(ui, K_SRCSTATUS, S, 514, 517, 208, 30, 0, 0, 0);
 }
 
 /* Player page geometry for the current EQ / PL visibility. Hiding the playlist
@@ -1401,7 +1446,7 @@ static void close_menu(ea_ui *ui)
     for (i = 0; i < ui->nw; i++) ui->w[i].dirty = 1;
 }
 
-void ui_list_reset(ea_ui *ui) { ui->lib.scroll = 0; mark_kind(ui, K_LIBLIST); }
+void ui_list_reset(ea_ui *ui) { ui->lib.scroll = 0; ui->lib.anchor = 0; mark_kind(ui, K_LIBLIST); }
 
 void ui_set_page(ea_ui *ui, int page)
 {
@@ -1638,6 +1683,8 @@ static void dlg_fire(ea_ui *ui, int button)
     else command(ui, button == 1 ? EA_CMD_SRC_FORM_SUBMIT : EA_CMD_SRC_FORM_CANCEL);
 }
 
+void ui_set_mods(ea_ui *ui, int mods) { ui->mods = mods; }
+
 void ui_mouse_move(ea_ui *ui, int x, int y)
 {
     if (dlg_active(ui)) {
@@ -1693,8 +1740,8 @@ void ui_mouse_down(ea_ui *ui, int x, int y)
     case K_EQSMALL: case K_BANK: bank_drag(ui, w, x, y, 1); break;
     case K_SEEK:    ui->press_v = (float)(x - w->r.x - 7) / (float)(w->r.w - 14);
                     ui->press_v = ui->press_v < 0 ? 0 : (ui->press_v > 1 ? 1 : ui->press_v); break;
-    case K_PLAYLIST: { int idx = lv_press(&w->r, &ui->pl, ui->m->ntracks, x, y); if (idx != -2) ui->m->sel = idx; break; }
-    case K_LIBLIST:  { int idx = lv_press(&w->r, &ui->lib, ui->m->src_nitems, x, y); if (idx != -2) ui->m->src_sel = idx; break; }
+    case K_PLAYLIST: { int idx = lv_press(&w->r, &ui->pl, ui->m->ntracks, x, y); if (idx != -2) marks_touch(ui, &ui->pl, pl_mark, ui->m->ntracks, idx, &ui->m->sel); break; }
+    case K_LIBLIST:  { int idx = lv_press(&w->r, &ui->lib, ui->m->src_nitems, x, y); if (idx != -2) { marks_touch(ui, &ui->lib, lib_mark, ui->m->src_nitems, idx, &ui->m->src_sel); mark_kind(ui, K_SRCSTATUS); } break; }
     case K_SRCACCT: {
         int row = (y - w->r.y - 2) / PL_ROW_H;
         if (row >= 0 && row < ui->m->naccts) { ui->m->acct_sel = row; w->dirty = 1; if (ui->act.src_open) ui->act.src_open(ui->act.ctx, -1); }
@@ -1801,10 +1848,12 @@ void ui_key(ea_ui *ui, int key)
     if (m->page == EA_PAGE_PLAYER && m->ntracks > 0) {
         if (key == UI_KEY_ENTER) { if (m->sel >= 0 && ui->act.play_index) ui->act.play_index(ui->act.ctx, m->sel); return; }
         if (key == UI_KEY_DELETE) { command(ui, EA_CMD_PL_REMOVE); return; }
-        if (nav(key, &m->sel, m->ntracks, lv_rows(&R_PLLIST))) { lv_reveal(&R_PLLIST, &ui->pl, m->ntracks, m->sel); mark_kind(ui, K_PLAYLIST); }
+        if (key == UI_KEY_SELECT_ALL) { marks_set(ui, pl_mark, m->ntracks, 0, m->ntracks - 1, 1); mark_kind(ui, K_PLAYLIST); return; }
+        { int to = m->sel; if (nav(key, &to, m->ntracks, lv_rows(&R_PLLIST))) { int keep = ui->mods; ui->mods &= UI_MOD_SHIFT; marks_touch(ui, &ui->pl, pl_mark, m->ntracks, to, &m->sel); ui->mods = keep; lv_reveal(&R_PLLIST, &ui->pl, m->ntracks, m->sel); mark_kind(ui, K_PLAYLIST); } }
     } else if (m->page == EA_PAGE_SOURCES && m->src_nitems > 0) {
         if (key == UI_KEY_ENTER) { if (m->src_sel >= 0 && ui->act.src_open) ui->act.src_open(ui->act.ctx, m->src_sel); return; }
-        if (nav(key, &m->src_sel, m->src_nitems, lv_rows(&R_LIBLIST))) { lv_reveal(&R_LIBLIST, &ui->lib, m->src_nitems, m->src_sel); mark_kind(ui, K_LIBLIST); }
+        if (key == UI_KEY_SELECT_ALL) { marks_set(ui, lib_mark, m->src_nitems, 0, m->src_nitems - 1, 1); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_SRCSTATUS); return; }
+        { int to = m->src_sel; if (nav(key, &to, m->src_nitems, lv_rows(&R_LIBLIST))) { int keep = ui->mods; ui->mods &= UI_MOD_SHIFT; marks_touch(ui, &ui->lib, lib_mark, m->src_nitems, to, &m->src_sel); ui->mods = keep; lv_reveal(&R_LIBLIST, &ui->lib, m->src_nitems, m->src_sel); mark_kind(ui, K_LIBLIST); mark_kind(ui, K_SRCSTATUS); } }
     }
 }
 

@@ -85,7 +85,7 @@ any desktop.
 ```sh
 make palette # re-tune the 256-colour palette after a visual change (commit the result)
 make shots   # render every UI state to build/shots/*.png, no Windows needed
-make test    # known-answer checks for the filters and the analyzer
+make test    # filters + analyzer, JSON, EQ file formats, list multi-select
 make win     # cross-compile build/EASYAMP.EXE (needs i686-w64-mingw32-gcc)
 ```
 
@@ -108,7 +108,10 @@ Verified on real hardware: an HP Pavilion 6460 (Windows 98 SE, Celeron 400,
   varispeed pitch. IMPORT / EXPORT read and write the GTK app's formats:
   Equalizer APO config files and the AutoEQ `GraphicEQ:` line.
 - Spectrum / VU / scope / LED meters.
-- Plex and Jellyfin, up to four accounts at once (see below).
+- Plex and Jellyfin, up to four accounts at once (see below). Ctrl / Shift
+  click, Shift + arrows and Ctrl + A select several rows; ADD, PLAY and ADD ALL
+  take tracks as they are and expand folders to every track beneath them,
+  with a live count and BACK to stop. The playlist selects the same way.
 - The EQ and PL buttons hide their panels and the page reflows.
 - Settings, the EQ bank, the window position and the playlist are kept
   between runs in `EASYAMP.INI` / `EASYAMP.M3U` beside the exe.

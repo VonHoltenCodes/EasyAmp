@@ -3,7 +3,7 @@
 #ifndef EA_APP_H
 #define EA_APP_H
 
-#define EA_VERSION     "0.3.0"
+#define EA_VERSION     "0.4.0"
 #define EA_MAX_BANDS   32
 #define EA_MIN_BANDS   10
 #define EA_GRAPHIC_N   10
@@ -26,11 +26,12 @@ enum {  /* ea_actions.command ids */
     EA_CMD_EQ_IMPORT, EA_CMD_EQ_EXPORT_APO, EA_CMD_EQ_EXPORT_GEQ,
     EA_CMD_WIN_MINIMIZE, EA_CMD_WIN_CLOSE, EA_CMD_OPEN_UPDATE,
     EA_CMD_SRC_LINK, EA_CMD_SRC_LINK_CANCEL, EA_CMD_SRC_JELLYFIN, EA_CMD_SRC_REMOVE,
-    EA_CMD_SRC_BACK, EA_CMD_SRC_PLAY, EA_CMD_SRC_ADD, EA_CMD_SRC_FORM_SUBMIT, EA_CMD_SRC_FORM_CANCEL
+    EA_CMD_SRC_BACK, EA_CMD_SRC_PLAY, EA_CMD_SRC_ADD, EA_CMD_SRC_FORM_SUBMIT, EA_CMD_SRC_FORM_CANCEL,
+    EA_CMD_SRC_ADD_ALL
 };
 
-typedef struct { char title[160]; int dur_s; } ea_track;
-typedef struct { char name[128]; int container; } ea_srcitem;      /* a row in the library browser */
+typedef struct { char title[160]; int dur_s; int marked; } ea_track;
+typedef struct { char name[128]; int container; int marked; } ea_srcitem;   /* a row in the library browser */
 
 enum { EA_SRC_NONE, EA_SRC_OK, EA_SRC_UNREACHABLE };
 #define EA_MAX_SOURCES 4

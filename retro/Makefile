@@ -50,6 +50,7 @@ test: build/easyamp-shot
 	$(CC) $(CFLAGS) -o build/test_dsp tests/test_dsp.c src/dsp.c src/app.c -lm && ./build/test_dsp
 	$(CC) $(CFLAGS) -o build/test_json tests/test_json.c src/json.c && ./build/test_json
 	$(CC) $(CFLAGS) -o build/test_eqio tests/test_eqio.c src/app.c -lm && ./build/test_eqio
+	$(CC) $(CFLAGS) -o build/test_select tests/test_select.c $(CORE) -lm && ./build/test_select
 
 .PHONY: win test
 

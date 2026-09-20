@@ -166,6 +166,7 @@ int main(int argc, char **argv)
         strcpy(m.src_crumb, "STARBASE1 > MUSIC"); strcpy(m.src_status, "60 ARTISTS");
         for (i = 0; i < 60; i++) { sprintf(lib[i].name, "%s%s", names[i % 14], i >= 14 ? " (more)" : ""); lib[i].container = 1; }
         m.src_items = lib; m.src_nitems = 60; m.src_sel = 1;
+        lib[1].marked = lib[3].marked = lib[4].marked = lib[5].marked = lib[9].marked = 1; strcpy(m.src_status, "5 SELECTED");
         ui_model_changed(ui, UI_CH_SOURCES);
         shot(ui, dir, "sources-browse");
         shot_indexed(ui, dir, "sources-browse-256", EA_PAL256, EA_LUT256, 20);
