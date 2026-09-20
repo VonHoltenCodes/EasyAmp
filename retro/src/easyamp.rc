@@ -1,0 +1,22 @@
+1 ICON "easyamp.ico"
+1 VERSIONINFO
+FILEVERSION 0,4,1,0
+PRODUCTVERSION 0,4,1,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904E4"
+    BEGIN
+      VALUE "CompanyName", "VonHoltenCodes"
+      VALUE "FileDescription", "EasyAmp"
+      VALUE "FileVersion", "0.4.1"
+      VALUE "ProductName", "EasyAmp"
+      VALUE "ProductVersion", "0.4.1"
+      VALUE "LegalCopyright", "MIT License"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1252
+  END
+END

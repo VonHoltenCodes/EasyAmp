@@ -1,0 +1,75 @@
+name: Retro (Windows 98 SE / XP)
+
+# The retro client releases on its own tag pattern. It must NOT use `v*`:
+# that pattern belongs to the GTK app and starts its three release builds.
+on:
+  push:
+    tags: ['retro-v*']
+  pull_request:
+    branches: [main]
+    paths: ['retro/**', '.github/workflows/retro.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build EASYAMP.EXE (i686, no SSE)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-i686 binutils-mingw-w64-i686 nsis
+
+      - name: Tests (filters, JSON, EQ formats, list selection)
+        working-directory: retro
+        run: make test
+
+      # `make win` fetches BearSSL at its pinned commit, links the exe and then
+      # runs tools/check-imports.sh, which fails the build if the exe imports
+      # anything Windows 98 SE lacks - the loader there would refuse to start it.
+      - name: Build
+        working-directory: retro
+        run: make win installer
+
+      - name: Tag must match the version compiled into the exe
+        if: startsWith(github.ref, 'refs/tags/retro-v')
+        working-directory: retro
+        run: |
+          WANT="${GITHUB_REF_NAME#retro-v}"
+          HAVE=$(sed -n 's/^#define EA_VERSION *"\(.*\)"/\1/p' src/app.h)
+          [ "$WANT" = "$HAVE" ] || { echo "tag says $WANT, src/app.h says $HAVE"; exit 1; }
+
+      - name: Package
+        working-directory: retro
+        run: |
+          mkdir -p dist
+          cp build/EasyAmp-Retro-Setup.exe build/EASYAMP.EXE web/README.TXT dist/
+          cd dist
+          zip -q EasyAmp-retro-portable.zip EASYAMP.EXE README.TXT
+          sha256sum EasyAmp-Retro-Setup.exe EasyAmp-retro-portable.zip EASYAMP.EXE > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EasyAmp-retro-win98-xp
+          path: |
+            retro/dist/EasyAmp-Retro-Setup.exe
+            retro/dist/EasyAmp-retro-portable.zip
+            retro/dist/SHA256SUMS.txt
+
+      # make_latest: false is load-bearing. The README and the website link to
+      # releases/latest/download/... for the GTK app's installers; a retro
+      # release marked "latest" would break every one of those buttons.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/retro-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: false
+          files: |
+            retro/dist/EasyAmp-Retro-Setup.exe
+            retro/dist/EasyAmp-retro-portable.zip
+            retro/dist/SHA256SUMS.txt
