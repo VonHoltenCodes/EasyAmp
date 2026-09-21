@@ -1,8 +1,10 @@
 # EasyAmp
 
-A **self-contained classic-player-style media player with a 10-band EQ** — a loving tribute to the late-90s desktop audio player, built fresh in GTK4 with original artwork.
+A **self-contained classic-player-style media player with a real equalizer** — a loving tribute to the late-90s desktop audio player, built fresh in GTK4 with original artwork. **[easyampstereo.com](https://easyampstereo.com)**
 
-EasyAmp plays your local music through its own GStreamer pipeline (with a built-in graphic EQ) and shows a live spectrum or analog VU meters. Because it owns its own window, the chrome is pixel-styled to evoke the era.
+EasyAmp plays your local music, or streams from your own **Plex** or **Jellyfin** server, through its own GStreamer pipeline with a built-in EQ, and shows a live spectrum or analog VU meters. Because it owns its own window, the chrome is pixel-styled to evoke the era.
+
+It runs on **Windows, macOS and Linux** — and there is a separate native build for **[Windows 98 SE and XP](#easyamp-retro--windows-98-se-and-xp)**, for the machines the era actually ran on.
 
 > Original artwork and an original name. EasyAmp uses **no** trademarked names, logos, or skin bitmaps from any media player. It's a tribute to an era, not a clone of a product.
 
@@ -13,18 +15,13 @@ EasyAmp plays your local music through its own GStreamer pipeline (with a built-
 ## Features
 
 - **Media player** — open files/playlists (anything GStreamer decodes: MP3, FLAC, WAV, OGG, Opus, M4A…), transport controls, seek, track metadata, `.m3u` load/save.
-- **Built-in 10-band graphic EQ** — preamp + 10 bands with a live response curve, value-colored sliders, bypass, and **portable JSON presets** (auto-loads an `EASYAMP DEFAULT` preset if you save one).
-- **Visualizer** — switch between a live **green spectrum analyzer** (GStreamer capture + FFT) and dual **analog VU meters** (atomic-green, real dB scale, glowing needle). It captures the system output, so it reflects **all** audio playing on the machine, not just EasyAmp.
+- **Streams from Plex and Jellyfin** — the **SOURCES** page links your accounts (Plex by PIN code at plex.tv/link, Jellyfin by server address and sign-in), browses the library and adds tracks to the same playlist as your local files. Tokens are kept in the OS keyring (libsecret / Windows DPAPI / macOS Keychain), and saved playlists never contain them.
+- **Docked 10-band graphic EQ** — preamp + 10 bands with a live response curve, value-colored sliders, bypass, BASS and LOUD, and **portable JSON presets** (auto-loads an `EASYAMP DEFAULT` preset if you save one).
+- **Full EQUALIZER page** — a **10 to 32 band parametric** bank with per-band frequency and Q, in/out gain, balance and cassette-style varispeed knobs, LED level meters, and **import/export of Equalizer APO / AutoEQ GraphicEQ** files.
+- **Visualizer** — switch between a live **green spectrum analyzer** and dual **analog VU meters** (atomic-green, real dB scale, glowing needle), driven from exactly what EasyAmp is playing.
 - **Mini scope** — a small mirrored bar-graph waveform under the timer.
 - **Docked single-window UI** — player + EQ + playlist snap together with EQ/PL toggles, in a beveled gunmetal skin with green LCD readouts.
-
-## Requirements
-
-- Python 3 + PyGObject with **GTK 4** (`gir1.2-gtk-4.0`)
-- **GStreamer 1.x** with the base/good plugins (playback, `equalizer-10bands`)
-- **numpy** (spectrum FFT)
-- A working audio server (**PipeWire** or PulseAudio) for the visualizer capture
-- Fonts (OFL) — **DSEG7 Classic** and **Pixelify Sans** ship bundled and auto-install on first run
+- **Update notice** — a small footer badge lights up when a newer release is out. Nothing downloads or installs by itself.
 
 ## Download
 
@@ -38,6 +35,31 @@ Grab a ready-to-run build from the **[latest release](https://github.com/VonHolt
 | 🐧 **Linux** | **[Flatpak bundle](https://github.com/VonHoltenCodes/EasyAmp/releases/latest/download/EasyAmp.flatpak)** | `flatpak install --user EasyAmp.flatpak` |
 
 > Everything is bundled — no Python or GTK install required. To build from source instead, see below.
+
+## EasyAmp Retro — Windows 98 SE and XP
+
+![EasyAmp Retro streaming from Plex on a real Windows 98 SE machine](retro/docs/win98-hardware.png)
+
+A sibling of the GTK app, not a port: the same look, EQ model, preset roster and playlist format, written from scratch in C against the Win32 API as **one small executable** that runs on Windows 98 SE through XP SP3. Pentium II class CPU, any colour depth from 16 colours up, no runtimes or DLLs to install.
+
+- Plays MP3, FLAC, Ogg Vorbis and WAV, with the 10-band EQ, presets, spectrum analyzer and VU meters.
+- **Streams from Plex and Jellyfin.** These machines cannot speak modern TLS, so the player carries its own; you link Plex by typing a four-character code at plex.tv/link on your phone.
+- Installer with Start Menu and desktop shortcuts and an Add/Remove Programs entry, or a portable zip. The installer fits on a floppy.
+- Fits itself to small screens: the window gives up height first, then scales the whole picture down for netbooks and 640×480.
+
+**Get it from the old PC itself:** open `http://dl.easyampstereo.com/retro/` in Internet Explorer — a plain HTTP page with no scripts, made for old browsers. From a modern machine, use the table above or the **[retro page](https://easyampstereo.com/retro.html)**. Source, build notes and screenshots: [`retro/`](retro/README.md).
+
+Retro releases are tagged `retro-v*` and versioned separately from the main app.
+
+## Requirements (running from source)
+
+The downloads above bundle all of this. You only need it to run or build from source:
+
+- Python 3 + PyGObject with **GTK 4** (`gir1.2-gtk-4.0`)
+- **GStreamer 1.x** with the base/good plugins (playback, `equalizer-10bands`)
+- **numpy** (spectrum FFT)
+- On Linux, a working audio server (**PipeWire** or PulseAudio)
+- Fonts (OFL) — **DSEG7 Classic** and **Pixelify Sans** ship bundled and auto-install on first run
 
 ## Install (from source)
 
@@ -62,7 +84,7 @@ python3 -m easyamp
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design. In short: a GStreamer `playbin` (with `equalizer-10bands` as its `audio-filter`) handles playback; the spectrum/VU come from an independent GStreamer `pulsesrc` capture of the system output, so they reflect *all* audio playing on the machine.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design. In short: a GStreamer `playbin` handles playback with EasyAmp's own filter chain (in-gain → varispeed → `equalizer-nbands` → tone → balance → out-gain) as its `audio-filter`; the spectrum/VU are driven from a tap on that same output, so they show exactly what EasyAmp is playing; streaming sources live behind one small interface in `easyamp/sources/`. The retro client has its own notes in [`retro/README.md`](retro/README.md).
 
 ## Authors
 
@@ -73,11 +95,12 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design. In short: a GStreamer `
 
 EasyAmp stands on a lot of open-source work — thank you to:
 
-- **[GStreamer](https://gstreamer.freedesktop.org/)** — playback pipeline, the `equalizer-10bands` graphic EQ, and the capture source.
-- **[PipeWire](https://pipewire.org/)** — audio capture for the visualizer.
+- **[GStreamer](https://gstreamer.freedesktop.org/)** — playback pipeline and the `equalizer-nbands` EQ.
+- **[PipeWire](https://pipewire.org/)** — audio on Linux.
 - **[GTK 4](https://www.gtk.org/) / [PyGObject](https://pygobject.gnome.org/)** — the UI toolkit.
 - **[DSEG](https://github.com/keshikan/DSEG)** 7-segment font by keshikan (SIL OFL).
 - **[Pixelify Sans](https://fonts.google.com/specimen/Pixelify+Sans)** by Stefie Justprince (SIL OFL).
+- Retro client: **[BearSSL](https://bearssl.org/)** (TLS), **[minimp3](https://github.com/lieff/minimp3)**, **[dr_flac](https://github.com/mackron/dr_libs)**, **[stb_vorbis](https://github.com/nothings/stb)**, **[jsmn](https://github.com/zserge/jsmn)** and **[NSIS](https://nsis.sourceforge.io/)** (installer).
 
 **Testing & QA**
 
